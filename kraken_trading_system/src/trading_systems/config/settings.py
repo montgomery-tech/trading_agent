@@ -2,7 +2,7 @@
 Configuration settings for the Kraken Trading System.
 """
 
-from typing import Optional
+from typing import Optional, Tuple
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -51,12 +51,12 @@ class Settings(BaseSettings):
     log_level: str = Field(
         "INFO",
         description="Logging level",
-        regex="^(DEBUG|INFO|WARNING|ERROR|CRITICAL)$"
+        pattern="^(DEBUG|INFO|WARNING|ERROR|CRITICAL)$"
     )
     log_format: str = Field(
         "json",
         description="Log format (json or text)",
-        regex="^(json|text)$"
+        pattern="^(json|text)$"
     )
     environment: str = Field(
         "development",
@@ -120,13 +120,13 @@ class Settings(BaseSettings):
         description="Whether to check hostname in SSL certificates"
     )
 
-    def get_api_credentials(self) -> tuple[Optional[str], Optional[str]]:
+    def get_api_credentials(self) -> Tuple[Optional[str], Optional[str]]:
         """Get the appropriate API credentials based on environment."""
         if self.use_sandbox:
             return self.sandbox_api_key, self.sandbox_api_secret
         return self.kraken_api_key, self.kraken_api_secret
 
-    def get_websocket_urls(self) -> tuple[str, str]:
+    def get_websocket_urls(self) -> Tuple[str, str]:
         """Get the WebSocket URLs for public and private connections."""
         return self.kraken_ws_public_url, self.kraken_ws_private_url
 

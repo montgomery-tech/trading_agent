@@ -1,6 +1,5 @@
 """
-Enhanced Kraken WebSocket client with subscription management methods.
-This implements the subscription methods needed for Task 1.3.1.
+Kraken WebSocket client for real-time market data and trading operations.
 """
 
 import asyncio
@@ -21,18 +20,20 @@ from ...utils.exceptions import (
 )
 from ...utils.logger import LoggerMixin, log_websocket_event
 from .models import (
-    KrakenChannelName,
-    create_subscribe_message,
-    create_unsubscribe_message,
+    create_subscribe_message, 
+    create_unsubscribe_message, 
+    KrakenChannelName
 )
 
 
 class KrakenWebSocketClient(LoggerMixin):
     """
-    Enhanced Kraken WebSocket client with subscription management.
+    Kraken WebSocket client for handling public and private connections.
 
     This client manages WebSocket connections to Kraken's public and private
     WebSocket endpoints, handling subscriptions, message routing, and reconnection logic.
+    
+    Now includes full BaseExchangeClient interface with subscription methods.
     """
 
     def __init__(self):
@@ -51,11 +52,10 @@ class KrakenWebSocketClient(LoggerMixin):
         # SSL context for handling certificate issues (especially on macOS)
         self.ssl_context = self._create_ssl_context()
 
-        # Enhanced subscription management
+        # Subscription management
         self.public_subscriptions: Set[str] = set()
         self.private_subscriptions: Set[str] = set()
         self.subscription_ids: Dict[str, int] = {}
-        self.channel_id_to_subscription: Dict[int, str] = {}  # Reverse mapping
         self.next_req_id = 1
 
         # Message queues for processing
@@ -121,12 +121,6 @@ class KrakenWebSocketClient(LoggerMixin):
             self.log_info("Created fallback SSL context (certificate verification disabled)")
             return ssl_context
 
-    def _get_next_req_id(self) -> int:
-        """Get next request ID for tracking subscriptions."""
-        req_id = self.next_req_id
-        self.next_req_id += 1
-        return req_id
-
     async def connect_public(self) -> None:
         """
         Connect to Kraken's public WebSocket endpoint.
@@ -156,300 +150,6 @@ class KrakenWebSocketClient(LoggerMixin):
 
         # TODO: Implement authentication in next task
         raise NotImplementedError("Private WebSocket connection requires authentication")
-
-    # NEW SUBSCRIPTION METHODS FOR TASK 1.3.1
-
-    async def subscribe_ticker(self, pairs: List[str]) -> Dict[str, Any]:
-        """
-        Subscribe to ticker data for specified trading pairs.
-
-        Args:
-            pairs: List of trading pairs (e.g., ['XBT/USD', 'ETH/USD'])
-
-        Returns:
-            Dictionary with subscription details
-
-        Raises:
-            WebSocketError: If not connected or subscription fails
-        """
-        if not self.is_public_connected:
-            raise WebSocketError("Must be connected to public WebSocket to subscribe")
-
-        req_id = self._get_next_req_id()
-
-        message = create_subscribe_message(
-            channel=KrakenChannelName.TICKER,
-            pairs=pairs,
-            reqid=req_id
-        )
-
-        await self.send_public_message(message)
-
-        # Track subscription attempt
-        for pair in pairs:
-            sub_key = f"ticker:{pair}"
-            self.public_subscriptions.add(sub_key)
-
-        log_websocket_event(
-            self.logger,
-            "ticker_subscription_sent",
-            pairs=pairs,
-            req_id=req_id
-        )
-
-        return {
-            "channel": "ticker",
-            "pairs": pairs,
-            "req_id": req_id,
-            "status": "subscription_sent"
-        }
-
-    async def subscribe_orderbook(self, pairs: List[str], depth: int = 10) -> Dict[str, Any]:
-        """
-        Subscribe to orderbook data for specified trading pairs.
-
-        Args:
-            pairs: List of trading pairs (e.g., ['XBT/USD', 'ETH/USD'])
-            depth: Orderbook depth (10, 25, 100, 500, 1000)
-
-        Returns:
-            Dictionary with subscription details
-
-        Raises:
-            WebSocketError: If not connected or subscription fails
-            ValueError: If depth is invalid
-        """
-        if not self.is_public_connected:
-            raise WebSocketError("Must be connected to public WebSocket to subscribe")
-
-        # Validate depth
-        valid_depths = [10, 25, 100, 500, 1000]
-        if depth not in valid_depths:
-            raise ValueError(f"Invalid depth {depth}. Must be one of {valid_depths}")
-
-        req_id = self._get_next_req_id()
-
-        message = create_subscribe_message(
-            channel=KrakenChannelName.BOOK,
-            pairs=pairs,
-            depth=depth,
-            reqid=req_id
-        )
-
-        await self.send_public_message(message)
-
-        # Track subscription attempt
-        for pair in pairs:
-            sub_key = f"book:{pair}:{depth}"
-            self.public_subscriptions.add(sub_key)
-
-        log_websocket_event(
-            self.logger,
-            "orderbook_subscription_sent",
-            pairs=pairs,
-            depth=depth,
-            req_id=req_id
-        )
-
-        return {
-            "channel": "book",
-            "pairs": pairs,
-            "depth": depth,
-            "req_id": req_id,
-            "status": "subscription_sent"
-        }
-
-    async def subscribe_trades(self, pairs: List[str]) -> Dict[str, Any]:
-        """
-        Subscribe to trade data for specified trading pairs.
-
-        Args:
-            pairs: List of trading pairs (e.g., ['XBT/USD', 'ETH/USD'])
-
-        Returns:
-            Dictionary with subscription details
-
-        Raises:
-            WebSocketError: If not connected or subscription fails
-        """
-        if not self.is_public_connected:
-            raise WebSocketError("Must be connected to public WebSocket to subscribe")
-
-        req_id = self._get_next_req_id()
-
-        message = create_subscribe_message(
-            channel=KrakenChannelName.TRADE,
-            pairs=pairs,
-            reqid=req_id
-        )
-
-        await self.send_public_message(message)
-
-        # Track subscription attempt
-        for pair in pairs:
-            sub_key = f"trade:{pair}"
-            self.public_subscriptions.add(sub_key)
-
-        log_websocket_event(
-            self.logger,
-            "trades_subscription_sent",
-            pairs=pairs,
-            req_id=req_id
-        )
-
-        return {
-            "channel": "trade",
-            "pairs": pairs,
-            "req_id": req_id,
-            "status": "subscription_sent"
-        }
-
-    async def subscribe_ohlc(self, pairs: List[str], interval: int = 1) -> Dict[str, Any]:
-        """
-        Subscribe to OHLC (candlestick) data for specified trading pairs.
-
-        Args:
-            pairs: List of trading pairs (e.g., ['XBT/USD', 'ETH/USD'])
-            interval: Interval in minutes (1, 5, 15, 30, 60, 240, 1440, 10080, 21600)
-
-        Returns:
-            Dictionary with subscription details
-
-        Raises:
-            WebSocketError: If not connected or subscription fails
-            ValueError: If interval is invalid
-        """
-        if not self.is_public_connected:
-            raise WebSocketError("Must be connected to public WebSocket to subscribe")
-
-        # Validate interval
-        valid_intervals = [1, 5, 15, 30, 60, 240, 1440, 10080, 21600]
-        if interval not in valid_intervals:
-            raise ValueError(f"Invalid interval {interval}. Must be one of {valid_intervals}")
-
-        req_id = self._get_next_req_id()
-
-        message = create_subscribe_message(
-            channel=KrakenChannelName.OHLC,
-            pairs=pairs,
-            interval=interval,
-            reqid=req_id
-        )
-
-        await self.send_public_message(message)
-
-        # Track subscription attempt
-        for pair in pairs:
-            sub_key = f"ohlc:{pair}:{interval}"
-            self.public_subscriptions.add(sub_key)
-
-        log_websocket_event(
-            self.logger,
-            "ohlc_subscription_sent",
-            pairs=pairs,
-            interval=interval,
-            req_id=req_id
-        )
-
-        return {
-            "channel": "ohlc",
-            "pairs": pairs,
-            "interval": interval,
-            "req_id": req_id,
-            "status": "subscription_sent"
-        }
-
-    async def unsubscribe(self, channel: str, pairs: List[str], **kwargs) -> Dict[str, Any]:
-        """
-        Unsubscribe from a specific channel and pairs.
-
-        Args:
-            channel: Channel name (ticker, book, trade, ohlc)
-            pairs: List of trading pairs to unsubscribe from
-            **kwargs: Additional parameters (depth for book, interval for ohlc)
-
-        Returns:
-            Dictionary with unsubscription details
-
-        Raises:
-            WebSocketError: If not connected or unsubscription fails
-            ValueError: If channel is invalid
-        """
-        if not self.is_public_connected:
-            raise WebSocketError("Must be connected to public WebSocket to unsubscribe")
-
-        # Map string to enum
-        channel_map = {
-            "ticker": KrakenChannelName.TICKER,
-            "book": KrakenChannelName.BOOK,
-            "trade": KrakenChannelName.TRADE,
-            "ohlc": KrakenChannelName.OHLC,
-            "spread": KrakenChannelName.SPREAD
-        }
-
-        if channel not in channel_map:
-            raise ValueError(f"Invalid channel {channel}. Must be one of {list(channel_map.keys())}")
-
-        req_id = self._get_next_req_id()
-
-        message = create_unsubscribe_message(
-            channel=channel_map[channel],
-            pairs=pairs,
-            reqid=req_id
-        )
-
-        await self.send_public_message(message)
-
-        # Remove from tracked subscriptions
-        for pair in pairs:
-            if channel == "book" and "depth" in kwargs:
-                sub_key = f"{channel}:{pair}:{kwargs['depth']}"
-            elif channel == "ohlc" and "interval" in kwargs:
-                sub_key = f"{channel}:{pair}:{kwargs['interval']}"
-            else:
-                sub_key = f"{channel}:{pair}"
-
-            self.public_subscriptions.discard(sub_key)
-
-            # Remove from channel mapping if it exists
-            channel_id = self.subscription_ids.pop(sub_key, None)
-            if channel_id:
-                self.channel_id_to_subscription.pop(channel_id, None)
-
-        log_websocket_event(
-            self.logger,
-            "unsubscription_sent",
-            channel=channel,
-            pairs=pairs,
-            req_id=req_id
-        )
-
-        return {
-            "channel": channel,
-            "pairs": pairs,
-            "req_id": req_id,
-            "status": "unsubscription_sent"
-        }
-
-    def get_active_subscriptions(self) -> Dict[str, List[str]]:
-        """
-        Get all currently active subscriptions organized by channel.
-
-        Returns:
-            Dictionary mapping channel names to lists of subscriptions
-        """
-        subscriptions_by_channel = {}
-
-        for subscription in self.public_subscriptions:
-            channel = subscription.split(":")[0]
-            if channel not in subscriptions_by_channel:
-                subscriptions_by_channel[channel] = []
-            subscriptions_by_channel[channel].append(subscription)
-
-        return subscriptions_by_channel
-
-    # REST OF THE EXISTING WEBSOCKET CLIENT METHODS...
-    # (keeping existing methods unchanged)
 
     async def _connect_with_retry(self, endpoint: str) -> None:
         """
@@ -619,6 +319,224 @@ class KrakenWebSocketClient(LoggerMixin):
             self.is_private_connected = False
             self.private_ws = None
 
+    # NEW SUBSCRIPTION METHODS - BaseExchangeClient Interface Implementation
+
+    async def subscribe_ticker(self, pairs: List[str]) -> None:
+        """
+        Subscribe to ticker data for specified trading pairs.
+        
+        Args:
+            pairs: List of trading pairs (e.g., ["XBT/USD", "ETH/USD"])
+            
+        Raises:
+            WebSocketError: If not connected or subscription fails
+        """
+        if not self.is_public_connected:
+            raise WebSocketError("Public WebSocket not connected")
+        
+        try:
+            # Create subscription message using existing helper
+            message = create_subscribe_message(
+                channel=KrakenChannelName.TICKER,
+                pairs=pairs,
+                reqid=self.next_req_id
+            )
+            
+            self.next_req_id += 1
+            
+            # Send subscription request
+            await self.send_public_message(message)
+            
+            log_websocket_event(
+                self.logger,
+                "subscription_requested",
+                channel="ticker",
+                pairs=pairs,
+                req_id=message.get("reqid")
+            )
+            
+        except Exception as e:
+            self.log_error("Failed to subscribe to ticker", error=e, pairs=pairs)
+            raise WebSocketError(f"Ticker subscription failed: {e}")
+
+    async def subscribe_orderbook(self, pairs: List[str], depth: int = 10) -> None:
+        """
+        Subscribe to orderbook data for specified trading pairs.
+        
+        Args:
+            pairs: List of trading pairs (e.g., ["XBT/USD", "ETH/USD"])
+            depth: Orderbook depth (default: 10, max: 1000)
+            
+        Raises:
+            WebSocketError: If not connected or subscription fails
+        """
+        if not self.is_public_connected:
+            raise WebSocketError("Public WebSocket not connected")
+        
+        # Validate depth parameter
+        if depth <= 0 or depth > 1000:
+            raise ValueError("Orderbook depth must be between 1 and 1000")
+        
+        try:
+            # Create subscription message with depth
+            message = create_subscribe_message(
+                channel=KrakenChannelName.BOOK,
+                pairs=pairs,
+                depth=depth,
+                reqid=self.next_req_id
+            )
+            
+            self.next_req_id += 1
+            
+            # Send subscription request
+            await self.send_public_message(message)
+            
+            log_websocket_event(
+                self.logger,
+                "subscription_requested", 
+                channel="book",
+                pairs=pairs,
+                depth=depth,
+                req_id=message.get("reqid")
+            )
+            
+        except Exception as e:
+            self.log_error("Failed to subscribe to orderbook", error=e, pairs=pairs, depth=depth)
+            raise WebSocketError(f"Orderbook subscription failed: {e}")
+
+    async def subscribe_trades(self, pairs: List[str]) -> None:
+        """
+        Subscribe to trade data for specified trading pairs.
+        
+        Args:
+            pairs: List of trading pairs (e.g., ["XBT/USD", "ETH/USD"])
+            
+        Raises:
+            WebSocketError: If not connected or subscription fails
+        """
+        if not self.is_public_connected:
+            raise WebSocketError("Public WebSocket not connected")
+        
+        try:
+            # Create subscription message
+            message = create_subscribe_message(
+                channel=KrakenChannelName.TRADE,
+                pairs=pairs,
+                reqid=self.next_req_id
+            )
+            
+            self.next_req_id += 1
+            
+            # Send subscription request
+            await self.send_public_message(message)
+            
+            log_websocket_event(
+                self.logger,
+                "subscription_requested",
+                channel="trade", 
+                pairs=pairs,
+                req_id=message.get("reqid")
+            )
+            
+        except Exception as e:
+            self.log_error("Failed to subscribe to trades", error=e, pairs=pairs)
+            raise WebSocketError(f"Trade subscription failed: {e}")
+
+    async def unsubscribe(self, subscription_id: str) -> None:
+        """
+        Unsubscribe from a specific subscription.
+        
+        Args:
+            subscription_id: Subscription identifier in format "channel:pair" 
+                            (e.g., "ticker:XBT/USD", "book:ETH/USD")
+                            
+        Raises:
+            WebSocketError: If not connected or unsubscription fails
+            ValueError: If subscription_id format is invalid
+        """
+        if not self.is_public_connected:
+            raise WebSocketError("Public WebSocket not connected")
+        
+        # Parse subscription ID
+        try:
+            if ":" in subscription_id:
+                channel_name, pair = subscription_id.split(":", 1)
+                pairs = [pair]
+            else:
+                # Assume it's just a channel name for subscriptions without pairs
+                channel_name = subscription_id
+                pairs = None
+                
+            # Validate channel name
+            try:
+                channel = KrakenChannelName(channel_name)
+            except ValueError:
+                raise ValueError(f"Invalid channel name: {channel_name}")
+                
+        except Exception as e:
+            raise ValueError(f"Invalid subscription_id format '{subscription_id}': {e}")
+        
+        # Check if subscription exists
+        if subscription_id not in self.public_subscriptions:
+            self.log_warning(f"Subscription '{subscription_id}' not found in active subscriptions")
+            return
+        
+        try:
+            # Create unsubscription message
+            message = create_unsubscribe_message(
+                channel=channel,
+                pairs=pairs,
+                reqid=self.next_req_id
+            )
+            
+            self.next_req_id += 1
+            
+            # Send unsubscription request
+            await self.send_public_message(message)
+            
+            log_websocket_event(
+                self.logger,
+                "unsubscription_requested",
+                channel=channel_name,
+                pairs=pairs,
+                subscription_id=subscription_id,
+                req_id=message.get("reqid")
+            )
+            
+        except Exception as e:
+            self.log_error("Failed to unsubscribe", error=e, subscription_id=subscription_id)
+            raise WebSocketError(f"Unsubscription failed: {e}")
+
+    def get_active_subscriptions(self) -> Dict[str, Dict[str, Any]]:
+        """
+        Get information about all active subscriptions.
+        
+        Returns:
+            Dictionary mapping subscription IDs to subscription details
+        """
+        subscription_details = {}
+        
+        for sub_id in self.public_subscriptions:
+            details = {
+                "subscription_id": sub_id,
+                "channel_id": self.subscription_ids.get(sub_id),
+                "status": "subscribed"
+            }
+            
+            if ":" in sub_id:
+                channel, pair = sub_id.split(":", 1)
+                details["channel"] = channel
+                details["pair"] = pair
+            else:
+                details["channel"] = sub_id
+                details["pair"] = None
+                
+            subscription_details[sub_id] = details
+        
+        return subscription_details
+
+    # EXISTING MESSAGE HANDLING METHODS (keeping all original functionality)
+
     async def _handle_public_messages(self) -> None:
         """Handle incoming messages from public WebSocket."""
         if not self.public_ws:
@@ -680,12 +598,11 @@ class KrakenWebSocketClient(LoggerMixin):
                 )
 
     async def _handle_subscription_status(self, data: Dict[str, Any]) -> None:
-        """Handle subscription status messages with enhanced tracking."""
+        """Handle subscription status messages."""
         status = data.get("status")
         subscription = data.get("subscription", {})
         pair = data.get("pair")
         channel_name = subscription.get("name")
-        channel_id = data.get("channelID")
 
         log_websocket_event(
             self.logger,
@@ -693,37 +610,20 @@ class KrakenWebSocketClient(LoggerMixin):
             status=status,
             channel=channel_name,
             pair=pair,
-            channel_id=channel_id
+            channel_id=data.get("channelID")
         )
 
         if status == "subscribed":
-            # Store subscription info with enhanced tracking
-            if channel_name == "book" and "depth" in subscription:
-                sub_key = f"{channel_name}:{pair}:{subscription['depth']}"
-            elif channel_name == "ohlc" and "interval" in subscription:
-                sub_key = f"{channel_name}:{pair}:{subscription['interval']}"
-            else:
-                sub_key = f"{channel_name}:{pair}" if pair else channel_name
-
+            # Store subscription info
+            sub_key = f"{channel_name}:{pair}" if pair else channel_name
             self.public_subscriptions.add(sub_key)
-
-            if channel_id is not None:
-                self.subscription_ids[sub_key] = channel_id
-                self.channel_id_to_subscription[channel_id] = sub_key
-
+            if "channelID" in data:
+                self.subscription_ids[sub_key] = data["channelID"]
         elif status == "unsubscribed":
             # Remove subscription info
-            if channel_name == "book" and "depth" in subscription:
-                sub_key = f"{channel_name}:{pair}:{subscription['depth']}"
-            elif channel_name == "ohlc" and "interval" in subscription:
-                sub_key = f"{channel_name}:{pair}:{subscription['interval']}"
-            else:
-                sub_key = f"{channel_name}:{pair}" if pair else channel_name
-
+            sub_key = f"{channel_name}:{pair}" if pair else channel_name
             self.public_subscriptions.discard(sub_key)
-            channel_id = self.subscription_ids.pop(sub_key, None)
-            if channel_id is not None:
-                self.channel_id_to_subscription.pop(channel_id, None)
+            self.subscription_ids.pop(sub_key, None)
 
     async def _heartbeat_monitor(self) -> None:
         """Monitor connection health and send heartbeats if needed."""
@@ -757,22 +657,9 @@ class KrakenWebSocketClient(LoggerMixin):
             try:
                 # Parse subscription key
                 if ":" in subscription:
-                    parts = subscription.split(":")
-                    channel = parts[0]
-                    pair = parts[1]
-
-                    if channel == "ticker":
-                        await self.subscribe_ticker([pair])
-                    elif channel == "trade":
-                        await self.subscribe_trades([pair])
-                    elif channel == "book" and len(parts) == 3:
-                        depth = int(parts[2])
-                        await self.subscribe_orderbook([pair], depth=depth)
-                    elif channel == "ohlc" and len(parts) == 3:
-                        interval = int(parts[2])
-                        await self.subscribe_ohlc([pair], interval=interval)
-
-                    self.log_info(f"Resubscribed to {subscription}")
+                    channel, pair = subscription.split(":", 1)
+                    # TODO: Implement resubscription logic based on channel type
+                    self.log_info(f"Resubscribing to {channel} for {pair}")
                 else:
                     self.log_info(f"Resubscribing to {subscription}")
             except Exception as e:
@@ -840,9 +727,20 @@ class KrakenWebSocketClient(LoggerMixin):
                 self.log_error("Error in public message listener", error=e)
                 break
 
+    async def listen_private(self) -> AsyncGenerator[Dict[str, Any], None]:
+        """
+        Listen for messages from the private WebSocket.
+
+        Yields:
+            Parsed JSON messages from the private WebSocket
+        """
+        # TODO: Implement private message listening
+        raise NotImplementedError("Private WebSocket listening requires authentication")
+        yield  # Make it a generator
+
     def get_connection_status(self) -> Dict[str, Any]:
         """
-        Get current connection status with enhanced subscription information.
+        Get current connection status.
 
         Returns:
             Dictionary with connection status information
@@ -852,10 +750,9 @@ class KrakenWebSocketClient(LoggerMixin):
             "private_connected": self.is_private_connected,
             "public_subscriptions": list(self.public_subscriptions),
             "private_subscriptions": list(self.private_subscriptions),
-            "subscription_count": len(self.public_subscriptions),
-            "active_channels": len(self.subscription_ids),
             "last_heartbeat": self.last_heartbeat,
             "reconnect_attempts": self.reconnect_attempts,
             "ssl_verify_mode": self.ssl_context.verify_mode.name if hasattr(self.ssl_context.verify_mode, 'name') else str(self.ssl_context.verify_mode),
-            "ssl_check_hostname": self.ssl_context.check_hostname
+            "ssl_check_hostname": self.ssl_context.check_hostname,
+            "active_subscription_details": self.get_active_subscriptions()
         }

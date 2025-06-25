@@ -300,3 +300,251 @@ class TestKrakenWebSocketClient:
         except Exception:
             pass
         return messages
+
+    @pytest.mark.asyncio
+    async def test_subscribe_ticker_success(self, client, mock_websocket):
+        """Test successful ticker subscription."""
+        client.public_ws = mock_websocket
+        client.is_public_connected = True
+        
+        pairs = ["XBT/USD", "ETH/USD"]
+        
+        with patch.object(client, 'send_public_message') as mock_send:
+            await client.subscribe_ticker(pairs)
+        
+        # Verify send_public_message was called with correct parameters
+        mock_send.assert_called_once()
+        call_args = mock_send.call_args[0][0]
+        
+        assert call_args["event"] == "subscribe"
+        assert call_args["pair"] == pairs
+        assert call_args["subscription"]["name"] == "ticker"
+        assert "reqid" in call_args
+
+    @pytest.mark.asyncio
+    async def test_subscribe_ticker_not_connected(self, client):
+        """Test ticker subscription when not connected raises error."""
+        client.is_public_connected = False
+        
+        with pytest.raises(WebSocketError, match="Public WebSocket not connected"):
+            await client.subscribe_ticker(["XBT/USD"])
+
+    @pytest.mark.asyncio
+    async def test_subscribe_orderbook_success(self, client, mock_websocket):
+        """Test successful orderbook subscription with custom depth."""
+        client.public_ws = mock_websocket
+        client.is_public_connected = True
+        
+        pairs = ["XBT/USD"]
+        depth = 25
+        
+        with patch.object(client, 'send_public_message') as mock_send:
+            await client.subscribe_orderbook(pairs, depth=depth)
+        
+        # Verify send_public_message was called with correct parameters
+        mock_send.assert_called_once()
+        call_args = mock_send.call_args[0][0]
+        
+        assert call_args["event"] == "subscribe"
+        assert call_args["pair"] == pairs
+        assert call_args["subscription"]["name"] == "book"
+        assert call_args["subscription"]["depth"] == depth
+        assert "reqid" in call_args
+
+    @pytest.mark.asyncio
+    async def test_subscribe_orderbook_invalid_depth(self, client, mock_websocket):
+        """Test orderbook subscription with invalid depth raises error."""
+        client.public_ws = mock_websocket
+        client.is_public_connected = True
+        
+        # Test depth too small
+        with pytest.raises(ValueError, match="Orderbook depth must be between 1 and 1000"):
+            await client.subscribe_orderbook(["XBT/USD"], depth=0)
+        
+        # Test depth too large
+        with pytest.raises(ValueError, match="Orderbook depth must be between 1 and 1000"):
+            await client.subscribe_orderbook(["XBT/USD"], depth=1001)
+
+    @pytest.mark.asyncio
+    async def test_subscribe_trades_success(self, client, mock_websocket):
+        """Test successful trade subscription."""
+        client.public_ws = mock_websocket
+        client.is_public_connected = True
+        
+        pairs = ["XBT/USD", "ETH/USD"]
+        
+        with patch.object(client, 'send_public_message') as mock_send:
+            await client.subscribe_trades(pairs)
+        
+        # Verify send_public_message was called with correct parameters
+        mock_send.assert_called_once()
+        call_args = mock_send.call_args[0][0]
+        
+        assert call_args["event"] == "subscribe"
+        assert call_args["pair"] == pairs
+        assert call_args["subscription"]["name"] == "trade"
+        assert "reqid" in call_args
+
+    @pytest.mark.asyncio
+    async def test_unsubscribe_success(self, client, mock_websocket):
+        """Test successful unsubscription."""
+        client.public_ws = mock_websocket
+        client.is_public_connected = True
+        
+        # Add a subscription to unsubscribe from
+        subscription_id = "ticker:XBT/USD"
+        client.public_subscriptions.add(subscription_id)
+        
+        with patch.object(client, 'send_public_message') as mock_send:
+            await client.unsubscribe(subscription_id)
+        
+        # Verify send_public_message was called with correct parameters
+        mock_send.assert_called_once()
+        call_args = mock_send.call_args[0][0]
+        
+        assert call_args["event"] == "unsubscribe"
+        assert call_args["pair"] == ["XBT/USD"]
+        assert call_args["subscription"]["name"] == "ticker"
+        assert "reqid" in call_args
+
+    @pytest.mark.asyncio
+    async def test_unsubscribe_invalid_format(self, client, mock_websocket):
+        """Test unsubscription with invalid subscription ID format."""
+        client.public_ws = mock_websocket
+        client.is_public_connected = True
+        
+        # Test invalid channel name
+        with pytest.raises(ValueError, match="Invalid channel name"):
+            await client.unsubscribe("invalid_channel:XBT/USD")
+
+    @pytest.mark.asyncio
+    async def test_unsubscribe_nonexistent_subscription(self, client, mock_websocket):
+        """Test unsubscription of non-existent subscription (should not raise error)."""
+        client.public_ws = mock_websocket
+        client.is_public_connected = True
+        
+        # This should not raise an error, just log a warning
+        await client.unsubscribe("ticker:XBT/USD")
+        
+        # Should complete without raising an exception
+
+    def test_get_active_subscriptions_empty(self, client):
+        """Test getting active subscriptions when none exist."""
+        subscriptions = client.get_active_subscriptions()
+        assert subscriptions == {}
+
+    def test_get_active_subscriptions_with_data(self, client):
+        """Test getting active subscriptions with existing data."""
+        # Add some mock subscriptions
+        client.public_subscriptions.add("ticker:XBT/USD")
+        client.public_subscriptions.add("book:ETH/USD")
+        client.subscription_ids["ticker:XBT/USD"] = 1001
+        client.subscription_ids["book:ETH/USD"] = 1002
+        
+        subscriptions = client.get_active_subscriptions()
+        
+        assert len(subscriptions) == 2
+        
+        # Check ticker subscription
+        ticker_sub = subscriptions["ticker:XBT/USD"]
+        assert ticker_sub["channel"] == "ticker"
+        assert ticker_sub["pair"] == "XBT/USD"
+        assert ticker_sub["channel_id"] == 1001
+        assert ticker_sub["status"] == "subscribed"
+        
+        # Check book subscription
+        book_sub = subscriptions["book:ETH/USD"]
+        assert book_sub["channel"] == "book"
+        assert book_sub["pair"] == "ETH/USD"
+        assert book_sub["channel_id"] == 1002
+        assert book_sub["status"] == "subscribed"
+
+    @pytest.mark.asyncio
+    async def test_subscription_workflow_integration(self, client, mock_websocket):
+        """Test complete subscription workflow."""
+        client.public_ws = mock_websocket
+        client.is_public_connected = True
+        
+        # Test subscribing to multiple data types
+        with patch.object(client, 'send_public_message') as mock_send:
+            await client.subscribe_ticker(["XBT/USD"])
+            await client.subscribe_orderbook(["XBT/USD"], depth=10)
+            await client.subscribe_trades(["XBT/USD"])
+        
+        # Should have made 3 calls
+        assert mock_send.call_count == 3
+        
+        # Simulate subscription confirmations
+        await client._handle_subscription_status({
+            "event": "subscriptionStatus",
+            "status": "subscribed",
+            "channelID": 1001,
+            "subscription": {"name": "ticker"},
+            "pair": "XBT/USD"
+        })
+        
+        await client._handle_subscription_status({
+            "event": "subscriptionStatus", 
+            "status": "subscribed",
+            "channelID": 1002,
+            "subscription": {"name": "book"},
+            "pair": "XBT/USD"
+        })
+        
+        await client._handle_subscription_status({
+            "event": "subscriptionStatus",
+            "status": "subscribed", 
+            "channelID": 1003,
+            "subscription": {"name": "trade"},
+            "pair": "XBT/USD"
+        })
+        
+        # Check that subscriptions were tracked
+        assert "ticker:XBT/USD" in client.public_subscriptions
+        assert "book:XBT/USD" in client.public_subscriptions
+        assert "trade:XBT/USD" in client.public_subscriptions
+        
+        # Check subscription details
+        active_subs = client.get_active_subscriptions()
+        assert len(active_subs) == 3
+        
+        # Test unsubscribing
+        with patch.object(client, 'send_public_message') as mock_send:
+            await client.unsubscribe("ticker:XBT/USD")
+        
+        mock_send.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_subscription_error_handling(self, client, mock_websocket):
+        """Test error handling in subscription methods."""
+        client.public_ws = mock_websocket
+        client.is_public_connected = True
+        
+        # Test when send_public_message fails
+        with patch.object(client, 'send_public_message', side_effect=Exception("Send failed")):
+            with pytest.raises(WebSocketError, match="Ticker subscription failed"):
+                await client.subscribe_ticker(["XBT/USD"])
+
+    def test_req_id_increment(self, client):
+        """Test that request ID increments correctly."""
+        initial_req_id = client.next_req_id
+        
+        # Mock the connection and send method
+        client.is_public_connected = True
+        client.public_ws = AsyncMock()
+        
+        async def run_subscriptions():
+            with patch.object(client, 'send_public_message') as mock_send:
+                await client.subscribe_ticker(["XBT/USD"])
+                await client.subscribe_orderbook(["ETH/USD"])
+                await client.subscribe_trades(["BTC/EUR"])
+            
+            # Check that request IDs incremented
+            calls = mock_send.call_args_list
+            req_ids = [call[0][0]["reqid"] for call in calls]
+            
+            assert req_ids == [initial_req_id, initial_req_id + 1, initial_req_id + 2]
+            assert client.next_req_id == initial_req_id + 3
+        
+        import asyncio
+        asyncio.run(run_subscriptions())
