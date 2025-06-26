@@ -1,8 +1,9 @@
 """
 Configuration settings for the Kraken Trading System.
+Updated to include API credential management for WebSocket authentication.
 """
 
-from typing import Optional, Tuple
+from typing import Optional
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -120,19 +121,57 @@ class Settings(BaseSettings):
         description="Whether to check hostname in SSL certificates"
     )
 
-    def get_api_credentials(self) -> Tuple[Optional[str], Optional[str]]:
+    # WebSocket Token Management
+    token_refresh_buffer: int = Field(
+        120,
+        ge=30,
+        le=300,
+        description="Seconds before expiry to refresh WebSocket token"
+    )
+    token_request_timeout: float = Field(
+        30.0,
+        ge=5.0,
+        description="Timeout for WebSocket token requests in seconds"
+    )
+
+    def get_api_credentials(self) -> tuple[Optional[str], Optional[str]]:
         """Get the appropriate API credentials based on environment."""
         if self.use_sandbox:
             return self.sandbox_api_key, self.sandbox_api_secret
         return self.kraken_api_key, self.kraken_api_secret
 
-    def get_websocket_urls(self) -> Tuple[str, str]:
+    def get_websocket_urls(self) -> tuple[str, str]:
         """Get the WebSocket URLs for public and private connections."""
         return self.kraken_ws_public_url, self.kraken_ws_private_url
 
     def is_production(self) -> bool:
         """Check if running in production environment."""
         return self.environment.lower() == "production"
+
+    def has_api_credentials(self) -> bool:
+        """Check if API credentials are configured."""
+        api_key, api_secret = self.get_api_credentials()
+        return api_key is not None and api_secret is not None
+
+    def validate_api_credentials(self) -> bool:
+        """Validate that API credentials are properly formatted."""
+        api_key, api_secret = self.get_api_credentials()
+
+        if not api_key or not api_secret:
+            return False
+
+        # Basic validation - Kraken API keys are typically 56 chars
+        # and secrets are base64 encoded
+        if len(api_key) < 50:
+            return False
+
+        # Try to decode the secret to verify it's valid base64
+        try:
+            import base64
+            base64.b64decode(api_secret)
+            return True
+        except Exception:
+            return False
 
 
 # Global settings instance
