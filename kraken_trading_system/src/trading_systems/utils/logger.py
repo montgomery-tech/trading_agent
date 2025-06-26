@@ -62,7 +62,7 @@ def log_websocket_event(
     """Log WebSocket events with standardized format."""
     logger.info(
         "websocket_event",
-        event=event,
+        websocket_event=event,
         component="websocket",
         **kwargs
     )

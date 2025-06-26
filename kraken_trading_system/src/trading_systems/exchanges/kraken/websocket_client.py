@@ -1,12 +1,12 @@
 """
-Kraken WebSocket client for real-time market data and trading operations.
+Kraken WebSocket client with enhanced market data message parsing.
 """
 
 import asyncio
 import json
 import ssl
 import time
-from typing import Any, AsyncGenerator, Dict, List, Optional, Set
+from typing import Any, AsyncGenerator, Dict, List, Optional, Set, Union
 from urllib.parse import urlparse
 
 import websockets
@@ -22,18 +22,20 @@ from ...utils.logger import LoggerMixin, log_websocket_event
 from .models import (
     create_subscribe_message, 
     create_unsubscribe_message, 
-    KrakenChannelName
+    KrakenChannelName,
+    KrakenTickerData,
+    KrakenOrderBookData,
+    KrakenTradeData
 )
 
 
 class KrakenWebSocketClient(LoggerMixin):
     """
-    Kraken WebSocket client for handling public and private connections.
+    Kraken WebSocket client with enhanced market data parsing.
 
     This client manages WebSocket connections to Kraken's public and private
-    WebSocket endpoints, handling subscriptions, message routing, and reconnection logic.
-    
-    Now includes full BaseExchangeClient interface with subscription methods.
+    WebSocket endpoints, handling subscriptions, message routing, reconnection logic,
+    and real-time market data parsing and storage.
     """
 
     def __init__(self):
@@ -58,6 +60,15 @@ class KrakenWebSocketClient(LoggerMixin):
         self.subscription_ids: Dict[str, int] = {}
         self.next_req_id = 1
 
+        # NEW: Market data storage
+        self.latest_ticker: Dict[str, KrakenTickerData] = {}
+        self.latest_orderbook: Dict[str, KrakenOrderBookData] = {}
+        self.recent_trades: Dict[str, List[KrakenTradeData]] = {}
+        self.max_trades_per_pair = 100  # Keep last 100 trades per pair
+
+        # NEW: Channel ID to subscription mapping (reverse lookup)
+        self.channel_id_to_subscription: Dict[int, str] = {}
+
         # Message queues for processing
         self.public_message_queue: asyncio.Queue = asyncio.Queue()
         self.private_message_queue: asyncio.Queue = asyncio.Queue()
@@ -78,20 +89,10 @@ class KrakenWebSocketClient(LoggerMixin):
         )
 
     def _create_ssl_context(self) -> ssl.SSLContext:
-        """
-        Create SSL context with proper certificate handling.
-
-        This handles SSL certificate verification issues common on macOS
-        by providing automatic fallback to relaxed SSL settings for development.
-
-        Returns:
-            SSL context configured for WebSocket connections
-        """
+        """Create SSL context with proper certificate handling."""
         try:
-            # Create SSL context based on settings
             ssl_context = ssl.create_default_context()
 
-            # Apply SSL settings from configuration
             if not settings.ssl_verify_certificates:
                 ssl_context.verify_mode = ssl.CERT_NONE
                 self.log_info("SSL certificate verification disabled via settings")
@@ -108,56 +109,31 @@ class KrakenWebSocketClient(LoggerMixin):
             return ssl_context
 
         except Exception as e:
-            self.log_warning(
-                "SSL context creation failed, using fallback",
-                error=str(e)
-            )
-
-            # Fallback for certificate issues (common on macOS)
+            self.log_warning("SSL context creation failed, using fallback", error=str(e))
             ssl_context = ssl.create_default_context()
             ssl_context.check_hostname = False
             ssl_context.verify_mode = ssl.CERT_NONE
-
             self.log_info("Created fallback SSL context (certificate verification disabled)")
             return ssl_context
 
+    # CONNECTION METHODS (unchanged)
+    
     async def connect_public(self) -> None:
-        """
-        Connect to Kraken's public WebSocket endpoint.
-
-        Raises:
-            ConnectionError: If connection fails after retries
-        """
+        """Connect to Kraken's public WebSocket endpoint."""
         if self.is_public_connected:
             self.log_info("Public WebSocket already connected")
             return
-
         await self._connect_with_retry(endpoint="public")
 
     async def connect_private(self) -> None:
-        """
-        Connect to Kraken's private WebSocket endpoint.
-
-        Note: This requires API credentials and authentication.
-
-        Raises:
-            ConnectionError: If connection fails after retries
-            AuthenticationError: If authentication fails
-        """
+        """Connect to Kraken's private WebSocket endpoint."""
         if self.is_private_connected:
             self.log_info("Private WebSocket already connected")
             return
-
-        # TODO: Implement authentication in next task
         raise NotImplementedError("Private WebSocket connection requires authentication")
 
     async def _connect_with_retry(self, endpoint: str) -> None:
-        """
-        Connect to WebSocket with retry logic.
-
-        Args:
-            endpoint: Either "public" or "private"
-        """
+        """Connect to WebSocket with retry logic."""
         url = self.public_url if endpoint == "public" else self.private_url
 
         for attempt in range(self.max_reconnect_attempts):
@@ -170,12 +146,11 @@ class KrakenWebSocketClient(LoggerMixin):
                     url=url
                 )
 
-                # Connect to WebSocket with SSL context
                 ws = await asyncio.wait_for(
                     websockets.connect(
                         url,
                         ssl=self.ssl_context,
-                        ping_interval=None,  # We'll handle heartbeat manually
+                        ping_interval=None,
                         ping_timeout=None
                     ),
                     timeout=self.connection_timeout
@@ -198,7 +173,6 @@ class KrakenWebSocketClient(LoggerMixin):
                     url=url
                 )
 
-                # Start message handling task
                 if endpoint == "public":
                     asyncio.create_task(self._handle_public_messages())
                     asyncio.create_task(self._heartbeat_monitor())
@@ -212,14 +186,13 @@ class KrakenWebSocketClient(LoggerMixin):
                     endpoint=endpoint
                 )
 
-                # Handle SSL errors with automatic retry using relaxed settings
                 if "SSL" in str(e) or "certificate" in str(e):
                     self.log_info("SSL error detected, retrying with relaxed SSL settings")
                     if await self._retry_with_relaxed_ssl(url, endpoint, attempt):
                         return
 
                 if attempt < self.max_reconnect_attempts - 1:
-                    await asyncio.sleep(self.reconnect_delay * (2 ** attempt))  # Exponential backoff
+                    await asyncio.sleep(self.reconnect_delay * (2 ** attempt))
                 else:
                     raise ConnectionError(
                         f"Failed to connect to {endpoint} WebSocket after {self.max_reconnect_attempts} attempts",
@@ -227,19 +200,8 @@ class KrakenWebSocketClient(LoggerMixin):
                     )
 
     async def _retry_with_relaxed_ssl(self, url: str, endpoint: str, attempt: int) -> bool:
-        """
-        Retry connection with relaxed SSL settings if SSL verification fails.
-
-        Args:
-            url: WebSocket URL to connect to
-            endpoint: Endpoint type ("public" or "private")
-            attempt: Current attempt number
-
-        Returns:
-            True if connection successful, False otherwise
-        """
+        """Retry connection with relaxed SSL settings."""
         try:
-            # Create more permissive SSL context
             relaxed_ssl_context = ssl.create_default_context()
             relaxed_ssl_context.check_hostname = False
             relaxed_ssl_context.verify_mode = ssl.CERT_NONE
@@ -262,7 +224,6 @@ class KrakenWebSocketClient(LoggerMixin):
                 timeout=self.connection_timeout
             )
 
-            # Update SSL context for future connections
             self.ssl_context = relaxed_ssl_context
 
             if endpoint == "public":
@@ -282,7 +243,6 @@ class KrakenWebSocketClient(LoggerMixin):
                 url=url
             )
 
-            # Start message handling task
             if endpoint == "public":
                 asyncio.create_task(self._handle_public_messages())
                 asyncio.create_task(self._heartbeat_monitor())
@@ -298,13 +258,7 @@ class KrakenWebSocketClient(LoggerMixin):
             return False
 
     async def disconnect(self, endpoint: Optional[str] = None) -> None:
-        """
-        Disconnect from WebSocket(s).
-
-        Args:
-            endpoint: Specific endpoint to disconnect ("public" or "private").
-                     If None, disconnect from all.
-        """
+        """Disconnect from WebSocket(s)."""
         if endpoint is None or endpoint == "public":
             if self.public_ws and not self.public_ws.closed:
                 await self.public_ws.close()
@@ -319,23 +273,14 @@ class KrakenWebSocketClient(LoggerMixin):
             self.is_private_connected = False
             self.private_ws = None
 
-    # NEW SUBSCRIPTION METHODS - BaseExchangeClient Interface Implementation
-
+    # SUBSCRIPTION METHODS (unchanged from 1.3.A)
+    
     async def subscribe_ticker(self, pairs: List[str]) -> None:
-        """
-        Subscribe to ticker data for specified trading pairs.
-        
-        Args:
-            pairs: List of trading pairs (e.g., ["XBT/USD", "ETH/USD"])
-            
-        Raises:
-            WebSocketError: If not connected or subscription fails
-        """
+        """Subscribe to ticker data for specified trading pairs."""
         if not self.is_public_connected:
             raise WebSocketError("Public WebSocket not connected")
         
         try:
-            # Create subscription message using existing helper
             message = create_subscribe_message(
                 channel=KrakenChannelName.TICKER,
                 pairs=pairs,
@@ -343,8 +288,6 @@ class KrakenWebSocketClient(LoggerMixin):
             )
             
             self.next_req_id += 1
-            
-            # Send subscription request
             await self.send_public_message(message)
             
             log_websocket_event(
@@ -360,25 +303,14 @@ class KrakenWebSocketClient(LoggerMixin):
             raise WebSocketError(f"Ticker subscription failed: {e}")
 
     async def subscribe_orderbook(self, pairs: List[str], depth: int = 10) -> None:
-        """
-        Subscribe to orderbook data for specified trading pairs.
-        
-        Args:
-            pairs: List of trading pairs (e.g., ["XBT/USD", "ETH/USD"])
-            depth: Orderbook depth (default: 10, max: 1000)
-            
-        Raises:
-            WebSocketError: If not connected or subscription fails
-        """
+        """Subscribe to orderbook data for specified trading pairs."""
         if not self.is_public_connected:
             raise WebSocketError("Public WebSocket not connected")
         
-        # Validate depth parameter
         if depth <= 0 or depth > 1000:
             raise ValueError("Orderbook depth must be between 1 and 1000")
         
         try:
-            # Create subscription message with depth
             message = create_subscribe_message(
                 channel=KrakenChannelName.BOOK,
                 pairs=pairs,
@@ -387,8 +319,6 @@ class KrakenWebSocketClient(LoggerMixin):
             )
             
             self.next_req_id += 1
-            
-            # Send subscription request
             await self.send_public_message(message)
             
             log_websocket_event(
@@ -405,20 +335,11 @@ class KrakenWebSocketClient(LoggerMixin):
             raise WebSocketError(f"Orderbook subscription failed: {e}")
 
     async def subscribe_trades(self, pairs: List[str]) -> None:
-        """
-        Subscribe to trade data for specified trading pairs.
-        
-        Args:
-            pairs: List of trading pairs (e.g., ["XBT/USD", "ETH/USD"])
-            
-        Raises:
-            WebSocketError: If not connected or subscription fails
-        """
+        """Subscribe to trade data for specified trading pairs."""
         if not self.is_public_connected:
             raise WebSocketError("Public WebSocket not connected")
         
         try:
-            # Create subscription message
             message = create_subscribe_message(
                 channel=KrakenChannelName.TRADE,
                 pairs=pairs,
@@ -426,8 +347,6 @@ class KrakenWebSocketClient(LoggerMixin):
             )
             
             self.next_req_id += 1
-            
-            # Send subscription request
             await self.send_public_message(message)
             
             log_websocket_event(
@@ -443,31 +362,18 @@ class KrakenWebSocketClient(LoggerMixin):
             raise WebSocketError(f"Trade subscription failed: {e}")
 
     async def unsubscribe(self, subscription_id: str) -> None:
-        """
-        Unsubscribe from a specific subscription.
-        
-        Args:
-            subscription_id: Subscription identifier in format "channel:pair" 
-                            (e.g., "ticker:XBT/USD", "book:ETH/USD")
-                            
-        Raises:
-            WebSocketError: If not connected or unsubscription fails
-            ValueError: If subscription_id format is invalid
-        """
+        """Unsubscribe from a specific subscription."""
         if not self.is_public_connected:
             raise WebSocketError("Public WebSocket not connected")
         
-        # Parse subscription ID
         try:
             if ":" in subscription_id:
                 channel_name, pair = subscription_id.split(":", 1)
                 pairs = [pair]
             else:
-                # Assume it's just a channel name for subscriptions without pairs
                 channel_name = subscription_id
                 pairs = None
                 
-            # Validate channel name
             try:
                 channel = KrakenChannelName(channel_name)
             except ValueError:
@@ -476,13 +382,11 @@ class KrakenWebSocketClient(LoggerMixin):
         except Exception as e:
             raise ValueError(f"Invalid subscription_id format '{subscription_id}': {e}")
         
-        # Check if subscription exists
         if subscription_id not in self.public_subscriptions:
             self.log_warning(f"Subscription '{subscription_id}' not found in active subscriptions")
             return
         
         try:
-            # Create unsubscription message
             message = create_unsubscribe_message(
                 channel=channel,
                 pairs=pairs,
@@ -490,8 +394,6 @@ class KrakenWebSocketClient(LoggerMixin):
             )
             
             self.next_req_id += 1
-            
-            # Send unsubscription request
             await self.send_public_message(message)
             
             log_websocket_event(
@@ -508,12 +410,7 @@ class KrakenWebSocketClient(LoggerMixin):
             raise WebSocketError(f"Unsubscription failed: {e}")
 
     def get_active_subscriptions(self) -> Dict[str, Dict[str, Any]]:
-        """
-        Get information about all active subscriptions.
-        
-        Returns:
-            Dictionary mapping subscription IDs to subscription details
-        """
+        """Get information about all active subscriptions."""
         subscription_details = {}
         
         for sub_id in self.public_subscriptions:
@@ -535,7 +432,7 @@ class KrakenWebSocketClient(LoggerMixin):
         
         return subscription_details
 
-    # EXISTING MESSAGE HANDLING METHODS (keeping all original functionality)
+    # ENHANCED MESSAGE HANDLING WITH ARRAY PARSING
 
     async def _handle_public_messages(self) -> None:
         """Handle incoming messages from public WebSocket."""
@@ -560,49 +457,211 @@ class KrakenWebSocketClient(LoggerMixin):
             self.log_error("Unexpected error in message handler", error=e)
             self.is_public_connected = False
 
-    async def _process_public_message(self, data: Dict[str, Any]) -> None:
+    async def _process_public_message(self, data: Union[Dict[str, Any], List[Any]]) -> None:
         """
-        Process incoming public WebSocket messages.
+        Enhanced message processing for both dict and array formats.
 
         Args:
-            data: Parsed JSON message from WebSocket
+            data: Parsed JSON message from WebSocket (dict or list)
         """
-        # Update heartbeat timestamp
         self.last_heartbeat = time.time()
 
-        # Handle different message types
+        # Handle dict messages (system messages, subscription status, etc.)
         if isinstance(data, dict):
-            event = data.get("event")
+            await self._process_dict_message(data)
+        
+        # Handle array messages (market data)
+        elif isinstance(data, list) and len(data) >= 3:
+            await self._process_array_message(data)
+        
+        else:
+            self.log_warning("Received unknown message format", 
+                           message_type=type(data).__name__, 
+                           data_length=len(data) if hasattr(data, '__len__') else 'unknown')
 
-            if event == "systemStatus":
-                log_websocket_event(
-                    self.logger,
-                    "system_status",
-                    status=data.get("status"),
-                    version=data.get("version")
-                )
-            elif event == "subscriptionStatus":
-                await self._handle_subscription_status(data)
-            elif event == "heartbeat":
-                log_websocket_event(self.logger, "heartbeat_received")
-            elif "errorMessage" in data:
-                self.log_error("Received error from Kraken", details=data)
-                raise handle_kraken_error(data)
+    async def _process_dict_message(self, data: Dict[str, Any]) -> None:
+        """Process dictionary format messages (system messages)."""
+        event = data.get("event")
+
+        if event == "systemStatus":
+            log_websocket_event(
+                self.logger,
+                "system_status",
+                status=data.get("status"),
+                version=data.get("version")
+            )
+        elif event == "subscriptionStatus":
+            await self._handle_subscription_status(data)
+        elif event == "heartbeat":
+            log_websocket_event(self.logger, "heartbeat_received")
+        elif "errorMessage" in data:
+            self.log_error("Received error from Kraken", details=data)
+            raise handle_kraken_error(data)
+        else:
+            log_websocket_event(
+                self.logger,
+                "unknown_dict_message",
+                event=event,
+                keys=list(data.keys())
+            )
+
+    async def _process_array_message(self, data: List[Any]) -> None:
+        """
+        Process array format messages (market data).
+        
+        Kraken array format: [channelID, data, channelName, pair]
+        """
+        try:
+            channel_id = data[0]
+            message_data = data[1]
+            channel_name = data[2] if len(data) > 2 else None
+            pair = data[3] if len(data) > 3 else None
+            
+            log_websocket_event(
+                self.logger,
+                "market_data_array_received",
+                channel_id=channel_id,
+                channel_name=channel_name,
+                pair=pair,
+                data_type=type(message_data).__name__
+            )
+            
+            # Route to appropriate parser based on subscription lookup
+            subscription_key = self._get_subscription_key_by_channel_id(channel_id)
+            if subscription_key:
+                channel_type = subscription_key.split(":")[0]
+                
+                if channel_type == "ticker":
+                    await self._parse_ticker_data(message_data, pair, channel_id)
+                elif channel_type == "book":
+                    await self._parse_orderbook_data(message_data, pair, channel_id)
+                elif channel_type == "trade":
+                    await self._parse_trade_data(message_data, pair, channel_id)
+                else:
+                    self.log_warning("Unknown channel type for market data", 
+                                   channel_type=channel_type, channel_id=channel_id)
             else:
-                # Market data message
-                log_websocket_event(
-                    self.logger,
-                    "market_data_received",
-                    channel_id=data.get("channelID"),
-                    channel_name=data.get("channelName")
-                )
+                # Fallback: try to determine from channel name
+                if channel_name:
+                    if "ticker" in channel_name.lower():
+                        await self._parse_ticker_data(message_data, pair, channel_id)
+                    elif "book" in channel_name.lower():
+                        await self._parse_orderbook_data(message_data, pair, channel_id)
+                    elif "trade" in channel_name.lower():
+                        await self._parse_trade_data(message_data, pair, channel_id)
+                    else:
+                        self.log_warning("Unknown channel name for market data", 
+                                       channel_name=channel_name, channel_id=channel_id)
+                else:
+                    self.log_warning("Cannot determine message type for array data", 
+                                   channel_id=channel_id)
+        
+        except (IndexError, TypeError) as e:
+            self.log_error("Failed to parse array message", error=e, data_length=len(data))
+
+    def _get_subscription_key_by_channel_id(self, channel_id: int) -> Optional[str]:
+        """Get subscription key by channel ID (reverse lookup)."""
+        return self.channel_id_to_subscription.get(channel_id)
+
+    async def _parse_ticker_data(self, data: Any, pair: str, channel_id: int) -> None:
+        """Parse ticker data into KrakenTickerData object."""
+        try:
+            if isinstance(data, dict):
+                ticker = KrakenTickerData(**data)
+                
+                if pair:
+                    self.latest_ticker[pair] = ticker
+                    
+                    log_websocket_event(
+                        self.logger,
+                        "ticker_data_parsed",
+                        pair=pair,
+                        channel_id=channel_id,
+                        bid_price=ticker.b[0] if ticker.b else None,
+                        ask_price=ticker.a[0] if ticker.a else None,
+                        last_price=ticker.c[0] if ticker.c else None
+                    )
+            else:
+                self.log_warning("Unexpected ticker data format", 
+                               data_type=type(data).__name__, pair=pair)
+        
+        except Exception as e:
+            self.log_error("Failed to parse ticker data", error=e, pair=pair, channel_id=channel_id)
+
+    async def _parse_orderbook_data(self, data: Any, pair: str, channel_id: int) -> None:
+        """Parse orderbook data into KrakenOrderBookData object."""
+        try:
+            if isinstance(data, dict):
+                orderbook = KrakenOrderBookData(**data)
+                
+                if pair:
+                    self.latest_orderbook[pair] = orderbook
+                    
+                    log_websocket_event(
+                        self.logger,
+                        "orderbook_data_parsed",
+                        pair=pair,
+                        channel_id=channel_id,
+                        asks_count=len(orderbook.asks) if orderbook.asks else 0,
+                        bids_count=len(orderbook.bids) if orderbook.bids else 0,
+                        checksum=orderbook.checksum
+                    )
+            else:
+                self.log_warning("Unexpected orderbook data format", 
+                               data_type=type(data).__name__, pair=pair)
+        
+        except Exception as e:
+            self.log_error("Failed to parse orderbook data", error=e, pair=pair, channel_id=channel_id)
+
+    async def _parse_trade_data(self, data: Any, pair: str, channel_id: int) -> None:
+        """Parse trade data into KrakenTradeData objects."""
+        try:
+            if isinstance(data, list):
+                parsed_trades = []
+                
+                for trade_array in data:
+                    if isinstance(trade_array, list) and len(trade_array) >= 6:
+                        trade_dict = {
+                            "price": trade_array[0],
+                            "volume": trade_array[1],
+                            "time": trade_array[2],
+                            "side": trade_array[3],
+                            "orderType": trade_array[4],
+                            "misc": trade_array[5] if len(trade_array) > 5 else ""
+                        }
+                        
+                        trade = KrakenTradeData(**trade_dict)
+                        parsed_trades.append(trade)
+                
+                if pair and parsed_trades:
+                    if pair not in self.recent_trades:
+                        self.recent_trades[pair] = []
+                    
+                    self.recent_trades[pair].extend(parsed_trades)
+                    self.recent_trades[pair] = self.recent_trades[pair][-self.max_trades_per_pair:]
+                    
+                    log_websocket_event(
+                        self.logger,
+                        "trade_data_parsed",
+                        pair=pair,
+                        channel_id=channel_id,
+                        new_trades_count=len(parsed_trades),
+                        total_stored_trades=len(self.recent_trades[pair])
+                    )
+            else:
+                self.log_warning("Unexpected trade data format", 
+                               data_type=type(data).__name__, pair=pair)
+        
+        except Exception as e:
+            self.log_error("Failed to parse trade data", error=e, pair=pair, channel_id=channel_id)
 
     async def _handle_subscription_status(self, data: Dict[str, Any]) -> None:
-        """Handle subscription status messages."""
+        """Handle subscription status messages with enhanced channel mapping."""
         status = data.get("status")
         subscription = data.get("subscription", {})
         pair = data.get("pair")
         channel_name = subscription.get("name")
+        channel_id = data.get("channelID")
 
         log_websocket_event(
             self.logger,
@@ -610,20 +669,78 @@ class KrakenWebSocketClient(LoggerMixin):
             status=status,
             channel=channel_name,
             pair=pair,
-            channel_id=data.get("channelID")
+            channel_id=channel_id
         )
 
         if status == "subscribed":
-            # Store subscription info
             sub_key = f"{channel_name}:{pair}" if pair else channel_name
             self.public_subscriptions.add(sub_key)
-            if "channelID" in data:
-                self.subscription_ids[sub_key] = data["channelID"]
+            
+            if channel_id is not None:
+                self.subscription_ids[sub_key] = channel_id
+                # Add reverse mapping for array message routing
+                self.channel_id_to_subscription[channel_id] = sub_key
+                
         elif status == "unsubscribed":
-            # Remove subscription info
             sub_key = f"{channel_name}:{pair}" if pair else channel_name
             self.public_subscriptions.discard(sub_key)
-            self.subscription_ids.pop(sub_key, None)
+            
+            # Remove from both mappings
+            channel_id = self.subscription_ids.pop(sub_key, None)
+            if channel_id is not None:
+                self.channel_id_to_subscription.pop(channel_id, None)
+
+    # DATA ACCESS METHODS
+
+    def get_latest_ticker(self, pair: str) -> Optional[KrakenTickerData]:
+        """Get the latest ticker data for a trading pair."""
+        return self.latest_ticker.get(pair)
+
+    def get_latest_orderbook(self, pair: str) -> Optional[KrakenOrderBookData]:
+        """Get the latest orderbook data for a trading pair."""
+        return self.latest_orderbook.get(pair)
+
+    def get_recent_trades(self, pair: str, limit: Optional[int] = None) -> List[KrakenTradeData]:
+        """Get recent trades for a trading pair."""
+        trades = self.recent_trades.get(pair, [])
+        if limit is not None:
+            return trades[-limit:]
+        return trades.copy()
+
+    def get_market_data_summary(self) -> Dict[str, Dict[str, Any]]:
+        """Get a summary of all available market data."""
+        summary = {}
+        
+        all_pairs = set()
+        all_pairs.update(self.latest_ticker.keys())
+        all_pairs.update(self.latest_orderbook.keys())
+        all_pairs.update(self.recent_trades.keys())
+        
+        for pair in all_pairs:
+            pair_summary = {
+                "pair": pair,
+                "has_ticker": pair in self.latest_ticker,
+                "has_orderbook": pair in self.latest_orderbook,
+                "trades_count": len(self.recent_trades.get(pair, [])),
+                "data_types": []
+            }
+            
+            if pair_summary["has_ticker"]:
+                pair_summary["data_types"].append("ticker")
+                ticker = self.latest_ticker[pair]
+                pair_summary["last_price"] = ticker.c[0] if ticker.c else None
+                
+            if pair_summary["has_orderbook"]:
+                pair_summary["data_types"].append("orderbook")
+                
+            if pair_summary["trades_count"] > 0:
+                pair_summary["data_types"].append("trades")
+                
+            summary[pair] = pair_summary
+        
+        return summary
+
+    # REMAINING METHODS (unchanged)
 
     async def _heartbeat_monitor(self) -> None:
         """Monitor connection health and send heartbeats if needed."""
@@ -631,11 +748,10 @@ class KrakenWebSocketClient(LoggerMixin):
             try:
                 current_time = time.time()
                 if current_time - self.last_heartbeat > self.heartbeat_interval:
-                    # Send ping to check connection
                     await self.send_public_message({"event": "ping"})
                     log_websocket_event(self.logger, "heartbeat_sent")
 
-                await asyncio.sleep(10)  # Check every 10 seconds
+                await asyncio.sleep(10)
             except Exception as e:
                 self.log_error("Error in heartbeat monitor", error=e)
                 break
@@ -646,7 +762,6 @@ class KrakenWebSocketClient(LoggerMixin):
             self.log_info("Attempting to reconnect to public WebSocket")
             try:
                 await self._connect_with_retry("public")
-                # Resubscribe to previous subscriptions
                 await self._resubscribe_public()
             except Exception as e:
                 self.log_error("Reconnection failed", error=e)
@@ -655,10 +770,8 @@ class KrakenWebSocketClient(LoggerMixin):
         """Resubscribe to previous public subscriptions after reconnection."""
         for subscription in self.public_subscriptions.copy():
             try:
-                # Parse subscription key
                 if ":" in subscription:
                     channel, pair = subscription.split(":", 1)
-                    # TODO: Implement resubscription logic based on channel type
                     self.log_info(f"Resubscribing to {channel} for {pair}")
                 else:
                     self.log_info(f"Resubscribing to {subscription}")
@@ -666,15 +779,7 @@ class KrakenWebSocketClient(LoggerMixin):
                 self.log_error("Failed to resubscribe", error=e, subscription=subscription)
 
     async def send_public_message(self, message: Dict[str, Any]) -> None:
-        """
-        Send a message to the public WebSocket.
-
-        Args:
-            message: Dictionary to send as JSON
-
-        Raises:
-            WebSocketError: If not connected or send fails
-        """
+        """Send a message to the public WebSocket."""
         if not self.is_public_connected or not self.public_ws:
             raise WebSocketError("Public WebSocket not connected")
 
@@ -692,28 +797,13 @@ class KrakenWebSocketClient(LoggerMixin):
             raise WebSocketError(f"Failed to send message: {e}")
 
     async def send_private_message(self, message: Dict[str, Any]) -> None:
-        """
-        Send a message to the private WebSocket.
-
-        Args:
-            message: Dictionary to send as JSON
-
-        Raises:
-            WebSocketError: If not connected or send fails
-        """
+        """Send a message to the private WebSocket."""
         if not self.is_private_connected or not self.private_ws:
             raise WebSocketError("Private WebSocket not connected")
-
-        # TODO: Implement private message sending with authentication
         raise NotImplementedError("Private WebSocket messaging requires authentication")
 
     async def listen_public(self) -> AsyncGenerator[Dict[str, Any], None]:
-        """
-        Listen for messages from the public WebSocket.
-
-        Yields:
-            Parsed JSON messages from the public WebSocket
-        """
+        """Listen for messages from the public WebSocket."""
         while self.is_public_connected:
             try:
                 message = await asyncio.wait_for(
@@ -728,23 +818,12 @@ class KrakenWebSocketClient(LoggerMixin):
                 break
 
     async def listen_private(self) -> AsyncGenerator[Dict[str, Any], None]:
-        """
-        Listen for messages from the private WebSocket.
-
-        Yields:
-            Parsed JSON messages from the private WebSocket
-        """
-        # TODO: Implement private message listening
+        """Listen for messages from the private WebSocket."""
         raise NotImplementedError("Private WebSocket listening requires authentication")
-        yield  # Make it a generator
+        yield
 
     def get_connection_status(self) -> Dict[str, Any]:
-        """
-        Get current connection status.
-
-        Returns:
-            Dictionary with connection status information
-        """
+        """Get current connection status."""
         return {
             "public_connected": self.is_public_connected,
             "private_connected": self.is_private_connected,
@@ -754,5 +833,6 @@ class KrakenWebSocketClient(LoggerMixin):
             "reconnect_attempts": self.reconnect_attempts,
             "ssl_verify_mode": self.ssl_context.verify_mode.name if hasattr(self.ssl_context.verify_mode, 'name') else str(self.ssl_context.verify_mode),
             "ssl_check_hostname": self.ssl_context.check_hostname,
-            "active_subscription_details": self.get_active_subscriptions()
+            "active_subscription_details": self.get_active_subscriptions(),
+            "market_data_summary": self.get_market_data_summary()
         }

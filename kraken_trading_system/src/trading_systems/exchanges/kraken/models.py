@@ -49,7 +49,7 @@ class SystemStatus(str, Enum):
 class KrakenSystemStatusMessage(BaseModel):
     """Kraken system status message."""
     connectionID: int
-    event: str = Field(..., regex="^systemStatus$")
+    event: str = Field(..., pattern="^systemStatus$")
     status: SystemStatus
     version: str
 
@@ -66,7 +66,7 @@ class KrakenSubscription(BaseModel):
 
 class KrakenSubscribeMessage(BaseModel):
     """Kraken subscribe message."""
-    event: str = Field("subscribe", regex="^subscribe$")
+    event: str = Field("subscribe", pattern="^subscribe$")
     pair: Optional[List[str]] = None
     subscription: KrakenSubscription
     reqid: Optional[int] = None
@@ -74,7 +74,7 @@ class KrakenSubscribeMessage(BaseModel):
 
 class KrakenUnsubscribeMessage(BaseModel):
     """Kraken unsubscribe message."""
-    event: str = Field("unsubscribe", regex="^unsubscribe$")
+    event: str = Field("unsubscribe", pattern="^unsubscribe$")
     pair: Optional[List[str]] = None
     subscription: KrakenSubscription
     reqid: Optional[int] = None
@@ -84,7 +84,7 @@ class KrakenSubscriptionStatusMessage(BaseModel):
     """Kraken subscription status message."""
     channelID: Optional[int] = None
     channelName: Optional[str] = None
-    event: str = Field(..., regex="^subscriptionStatus$")
+    event: str = Field(..., pattern="^subscriptionStatus$")
     pair: Optional[str] = None
     reqid: Optional[int] = None
     status: SubscriptionStatus
@@ -94,18 +94,18 @@ class KrakenSubscriptionStatusMessage(BaseModel):
 
 class KrakenHeartbeatMessage(BaseModel):
     """Kraken heartbeat message."""
-    event: str = Field(..., regex="^heartbeat$")
+    event: str = Field(..., pattern="^heartbeat$")
 
 
 class KrakenPingMessage(BaseModel):
     """Kraken ping message."""
-    event: str = Field("ping", regex="^ping$")
+    event: str = Field("ping", pattern="^ping$")
     reqid: Optional[int] = None
 
 
 class KrakenPongMessage(BaseModel):
     """Kraken pong message."""
-    event: str = Field(..., regex="^pong$")
+    event: str = Field(..., pattern="^pong$")
     reqid: Optional[int] = None
 
 
