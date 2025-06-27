@@ -856,6 +856,339 @@ class OrderManager(LoggerMixin):
             }
         }
 
+    def has_order(self, order_id: str) -> bool:
+        """
+        Check if an order exists in the manager.
+
+        Args:
+            order_id: The order ID to check
+
+        Returns:
+            True if the order exists, False otherwise
+        """
+        return order_id in self._orders
+
+    def get_order(self, order_id: str) -> Optional[EnhancedKrakenOrder]:
+        """
+        Get an order by its ID.
+
+        Args:
+            order_id: The order ID to retrieve
+
+        Returns:
+            The order if found, None otherwise
+        """
+        return self._orders.get(order_id)
+
+    def get_all_orders(self) -> List[EnhancedKrakenOrder]:
+        """
+        Get all orders managed by this OrderManager.
+
+        Returns:
+            List of all orders
+        """
+        return list(self._orders.values())
+
+    def get_active_orders(self) -> List[EnhancedKrakenOrder]:
+        """
+        Get all active orders (not filled, canceled, or rejected).
+
+        Returns:
+            List of active orders
+        """
+        active_states = {
+            OrderState.PENDING_NEW,
+            OrderState.PENDING_SUBMIT,
+            OrderState.OPEN,
+            OrderState.PARTIALLY_FILLED
+        }
+
+        return [
+            order for order in self._orders.values()
+            if order.state in active_states
+        ]
+
+    def get_pending_orders(self) -> List[EnhancedKrakenOrder]:
+        """
+        Get all pending orders (not yet submitted).
+
+        Returns:
+            List of pending orders
+        """
+        pending_states = {
+            OrderState.PENDING_NEW,
+            OrderState.PENDING_SUBMIT
+        }
+
+        return [
+            order for order in self._orders.values()
+            if order.state in pending_states
+        ]
+
+    async def sync_order_from_websocket(self, order_id: str, order_info: Dict[str, Any]) -> None:
+        """
+        Sync order state from WebSocket openOrders feed.
+
+        Args:
+            order_id: The order ID to sync
+            order_info: Order information from WebSocket
+        """
+        try:
+            order = self._orders.get(order_id)
+            if not order:
+                self.log_warning(f"Received WebSocket update for unknown order: {order_id}")
+                return
+
+            # Update order fields from WebSocket data
+            old_state = order.state
+
+            # Parse WebSocket order status
+            ws_status = order_info.get('status', 'unknown')
+            ws_vol_exec = Decimal(str(order_info.get('vol_exec', '0')))
+            ws_cost = Decimal(str(order_info.get('cost', '0')))
+            ws_fee = Decimal(str(order_info.get('fee', '0')))
+
+            # Update executed volume
+            if ws_vol_exec != order.volume_executed:
+                order.volume_executed = ws_vol_exec
+                order.volume_remaining = order.volume - ws_vol_exec
+
+                # Update cost and fees
+                if ws_cost > 0:
+                    order.cost = ws_cost
+                if ws_fee > 0:
+                    order.fee = ws_fee
+
+                # Update fill percentage
+                if order.volume > 0:
+                    order.fill_percentage = float((order.volume_executed / order.volume) * 100)
+
+            # Update order state based on WebSocket status
+            new_state = self._map_websocket_status_to_state(ws_status, order.volume_executed, order.volume)
+
+            if new_state != old_state:
+                await self._transition_order_state(order, new_state)
+
+            order.last_update = datetime.now()
+
+            self.log_info(
+                "Order synced from WebSocket",
+                order_id=order_id,
+                status=ws_status,
+                vol_exec=str(ws_vol_exec),
+                old_state=old_state.value,
+                new_state=order.state.value
+            )
+
+        except Exception as e:
+            self.log_error(
+                "Error syncing order from WebSocket",
+                order_id=order_id,
+                error=e
+            )
+
+    async def process_fill_update(self, trade_id: str, trade_info: Dict[str, Any]) -> None:
+        """
+        Process a fill update from WebSocket ownTrades feed.
+
+        Args:
+            trade_id: The trade ID
+            trade_info: Trade information from WebSocket
+        """
+        try:
+            order_id = trade_info.get('ordertxid')
+            if not order_id or order_id not in self._orders:
+                return
+
+            order = self._orders[order_id]
+
+            # Extract trade information
+            fill_volume = Decimal(str(trade_info.get('vol', '0')))
+            fill_price = Decimal(str(trade_info.get('price', '0')))
+            fill_fee = Decimal(str(trade_info.get('fee', '0')))
+            fill_cost = Decimal(str(trade_info.get('cost', '0')))
+
+            # Update order with fill information
+            await self.handle_fill(order_id, fill_volume, fill_price, fill_fee)
+
+            self.log_info(
+                "Fill processed from WebSocket",
+                trade_id=trade_id,
+                order_id=order_id,
+                volume=str(fill_volume),
+                price=str(fill_price),
+                fee=str(fill_fee)
+            )
+
+        except Exception as e:
+            self.log_error(
+                "Error processing fill update",
+                trade_id=trade_id,
+                error=e
+            )
+
+    def _map_websocket_status_to_state(self, ws_status: str, vol_executed: Decimal, total_volume: Decimal) -> OrderState:
+        """
+        Map WebSocket order status to internal OrderState.
+
+        Args:
+            ws_status: WebSocket order status
+            vol_executed: Volume executed
+            total_volume: Total order volume
+
+        Returns:
+            Corresponding OrderState
+        """
+        if ws_status == 'open':
+            if vol_executed == 0:
+                return OrderState.OPEN
+            elif vol_executed < total_volume:
+                return OrderState.PARTIALLY_FILLED
+            else:
+                return OrderState.FILLED
+        elif ws_status == 'closed':
+            return OrderState.FILLED
+        elif ws_status == 'canceled':
+            return OrderState.CANCELED
+        elif ws_status == 'expired':
+            return OrderState.EXPIRED
+        else:
+            return OrderState.OPEN  # Default fallback
+
+    async def _transition_order_state(self, order: EnhancedKrakenOrder, new_state: OrderState) -> None:
+        """
+        Transition order to new state with proper validation and event handling.
+
+        Args:
+            order: The order to transition
+            new_state: The new state to transition to
+        """
+        old_state = order.state
+
+        # Validate transition
+        if not OrderStateMachine.is_valid_transition(old_state, new_state):
+            self.log_warning(
+                "Invalid state transition attempted",
+                order_id=order.order_id,
+                old_state=old_state.value,
+                new_state=new_state.value
+            )
+            return
+
+        # Update order state
+        order.state = new_state
+        order.last_update = datetime.now()
+
+        # Update indices
+        self._update_order_indices(order, old_state, new_state)
+
+        # Update statistics
+        self._update_statistics_for_state_change(old_state, new_state)
+
+        self.log_info(
+            "Order state transitioned",
+            order_id=order.order_id,
+            old_state=old_state.value,
+            new_state=new_state.value
+        )
+
+    def _update_statistics_for_state_change(self, old_state: OrderState, new_state: OrderState) -> None:
+        """Update statistics when order state changes."""
+        if new_state == OrderState.FILLED:
+            self._stats['orders_filled'] += 1
+            self._stats['last_fill_time'] = datetime.now()
+        elif new_state == OrderState.CANCELED:
+            self._stats['orders_canceled'] += 1
+        elif new_state == OrderState.REJECTED:
+            self._stats['orders_rejected'] += 1
+        elif new_state == OrderState.OPEN and old_state == OrderState.PENDING_SUBMIT:
+            self._stats['orders_submitted'] += 1
+
+
+    # ALSO ADD THIS TO FIX THE get_connection_status METHOD:
+
+    def get_orders_summary(self) -> Dict[str, Any]:
+        """
+        Get summary of all orders from OrderManager.
+
+        Returns:
+            Dictionary with order summary information
+        """
+        if not self.order_manager:
+            return {"enabled": False, "orders": []}
+
+        stats = self.order_manager.get_statistics()
+        orders = self.order_manager.get_all_orders()
+
+        orders_data = []
+        for order in orders:
+            orders_data.append({
+                "order_id": order.order_id,
+                "state": order.state.value,
+                "pair": order.pair,
+                "type": order.type,
+                "volume": str(order.volume),
+                "volume_executed": str(order.volume_executed),
+                "price": str(order.price) if order.price else None,
+                "last_update": order.last_update.isoformat()
+            })
+
+        return {
+            "enabled": True,
+            "statistics": stats,
+            "orders": orders_data,
+            "total_orders": len(orders)
+        }
+
+    # ALSO ADD TO FIX THE EVENT HANDLER COUNT ISSUE:
+
+    def get_connection_status(self) -> Dict[str, Any]:
+        """Get current connection status including OrderManager integration."""
+        base_status = {
+            "public_connected": self.is_public_connected,
+            "private_connected": self.is_private_connected,
+            "public_subscriptions": list(self.public_subscriptions),
+            "private_subscriptions": list(self.private_subscriptions),
+            "has_token": self.current_token is not None,
+            "token_manager_initialized": self.token_manager is not None,
+            "last_heartbeat": self.last_heartbeat,
+            "reconnect_attempts": self.reconnect_attempts,
+            "ssl_verify_mode": self.ssl_context.verify_mode.name if hasattr(self.ssl_context.verify_mode, 'name') else str(self.ssl_context.verify_mode),
+            "ssl_check_hostname": self.ssl_context.check_hostname
+        }
+
+        # Add account data status
+        if self.account_manager:
+            account_stats = self.account_manager.get_statistics()
+            base_status.update({
+                "account_data_enabled": self._account_data_enabled,
+                "account_data_stats": account_stats
+            })
+        else:
+            base_status.update({
+                "account_data_enabled": False,
+                "account_data_stats": None
+            })
+
+        # Add OrderManager status - FIX THE EVENT HANDLER COUNT ISSUE
+        if self.order_manager:
+            order_stats = self.order_manager.get_statistics()
+            base_status.update({
+                "order_management_enabled": self._order_management_enabled,
+                "order_manager_stats": order_stats,
+                "order_event_handlers": {
+                    event_type: len(handlers) if isinstance(handlers, list) else 1
+                    for event_type, handlers in self._order_event_handlers.items()
+                }
+            })
+        else:
+            base_status.update({
+                "order_management_enabled": False,
+                "order_manager_stats": None,
+                "order_event_handlers": {}
+            })
+
+        return base_status
 
 # UTILITY FUNCTIONS FOR ORDER MANAGER
 
