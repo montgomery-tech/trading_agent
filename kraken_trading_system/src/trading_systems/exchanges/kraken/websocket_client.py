@@ -331,8 +331,8 @@ class KrakenWebSocketClient(LoggerMixin):
             self.log_error("Error syncing order.current_states with OrderManager", error=e)
 
     # NEW: OrderManager query methods
-    def get_order_status(self, order_id: str) -> Optional[Dict[str, Any]]:
-        """Get order status from OrderManager."""
+    def get_order_status(self, order_id: str) -> Dict[str, Any]:
+        """Get detailed status of a specific order."""
         if not self.order_manager:
             return None
 
@@ -342,16 +342,16 @@ class KrakenWebSocketClient(LoggerMixin):
 
         return {
             "order_id": order.order_id,
-            "state": order.current_state.value,
+            "current_state": order.current_state.value,
             "status": order.status,
             "pair": order.pair,
-            "type": order.type,
+            "side": order.type.value, 
             "volume": str(order.volume),
             "volume_executed": str(order.volume_executed),
             "price": str(order.price) if order.price else None,
             "last_update": order.last_update.isoformat(),
             "fill_percentage": order.fill_percentage
-        }
+    }
 
     def get_orders_summary(self) -> Dict[str, Any]:
         """Get summary of all orders from OrderManager."""
