@@ -551,32 +551,6 @@ class EnhancedKrakenRestClient(LoggerMixin):
 
     # EXISTING METHODS (from base REST client)
 
-    async def get_trade_history(self, **kwargs) -> Dict[str, Any]:
-        """
-        Get trade history.
-
-        Args:
-            **kwargs: Query parameters (type, trades, start, end, ofs)
-
-        Returns:
-            Trade history response from Kraken
-
-        Raises:
-            ExchangeError: If API call fails
-        """
-        try:
-            response = await self._make_request_with_retry(
-                "POST",
-                "/0/private/TradesHistory",
-                kwargs
-            )
-
-            return response
-
-        except Exception as e:
-            self.log_error("Failed to get trade history", error=e)
-            raise
-
     async def get_server_time(self) -> Dict[str, Any]:
         """Get server time from Kraken."""
         return await self._make_request_with_retry("GET", "/0/public/Time", authenticated=False)
