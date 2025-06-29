@@ -225,6 +225,38 @@ class EnhancedKrakenOrder(BaseKrakenOrder):
     # State machine integration
     _state_machine: OrderStateMachine = OrderStateMachine()
     
+    # PROPERTY ALIASES FOR BACKWARD COMPATIBILITY
+    
+    @property
+    def state(self) -> OrderState:
+        """Alias for current_state for backward compatibility."""
+        return self.current_state
+    
+    @state.setter
+    def state(self, value: OrderState) -> None:
+        """Setter for state alias."""
+        self.current_state = value
+    
+    @property
+    def side(self) -> OrderSide:
+        """Alias for type (order side) for backward compatibility."""
+        return self.type
+    
+    @side.setter
+    def side(self, value: OrderSide) -> None:
+        """Setter for side alias."""
+        self.type = value
+    
+    @property
+    def order_type(self) -> OrderType:
+        """Alias for order_type field for consistency."""
+        return getattr(self, '_order_type', OrderType.LIMIT)
+    
+    @order_type.setter
+    def order_type(self, value: OrderType) -> None:
+        """Setter for order_type."""
+        self._order_type = value
+
     def transition_to(self, new_state: OrderState, event: OrderEvent, 
                      reason: Optional[str] = None, exchange_data: Optional[Dict[str, Any]] = None) -> bool:
         """

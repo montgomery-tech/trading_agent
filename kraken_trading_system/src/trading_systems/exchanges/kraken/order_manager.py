@@ -492,7 +492,7 @@ class OrderManager(LoggerMixin):
         self.log_info("Event handler added", event=event, handler=handler.__name__)
 
     def add_state_change_handler(self, handler: Callable[[EnhancedKrakenOrder, OrderState, OrderState], None]) -> None:
-        """Add handler for order state changes."""
+        """Add handler for order.current_state changes."""
         self._state_change_handlers.append(handler)
         self.log_info("State change handler added", handler=handler.__name__)
 
@@ -511,7 +511,7 @@ class OrderManager(LoggerMixin):
     # INTEGRATION WITH ACCOUNT DATA MANAGER
 
     async def sync_with_account_manager(self) -> None:
-        """Synchronize order states with account manager data."""
+        """Synchronize order.current_states with account manager data."""
         if not self.account_manager:
             return
 
@@ -519,11 +519,11 @@ class OrderManager(LoggerMixin):
         account_orders = self.account_manager.get_open_orders()
         account_trades = self.account_manager.get_recent_trades(100)
 
-        # Sync order states
+        # Sync order.current_states
         for account_order in account_orders.values():
             internal_order = self.get_order(account_order.order_id)
             if internal_order:
-                await self._sync_order_state(internal_order, account_order)
+                await self._sync_order.current_state(internal_order, account_order)
 
         # Process recent trades for fills
         for trade in account_trades:
@@ -905,7 +905,7 @@ class OrderManager(LoggerMixin):
 
         return [
             order for order in self._orders.values()
-            if order.state in active_states
+            if order.current_state in active_states
         ]
 
     def get_pending_orders(self) -> List[EnhancedKrakenOrder]:
@@ -922,12 +922,12 @@ class OrderManager(LoggerMixin):
 
         return [
             order for order in self._orders.values()
-            if order.state in pending_states
+            if order.current_state in pending_states
         ]
 
     async def sync_order_from_websocket(self, order_id: str, order_info: Dict[str, Any]) -> None:
         """
-        Sync order state from WebSocket openOrders feed.
+        Sync order.current_state from WebSocket openOrders feed.
 
         Args:
             order_id: The order ID to sync
@@ -940,7 +940,7 @@ class OrderManager(LoggerMixin):
                 return
 
             # Update order fields from WebSocket data
-            old_state = order.state
+            old_state = order.current_state
 
             # Parse WebSocket order status
             ws_status = order_info.get('status', 'unknown')
@@ -951,19 +951,19 @@ class OrderManager(LoggerMixin):
             # Update executed volume
             if ws_vol_exec != order.volume_executed:
                 order.volume_executed = ws_vol_exec
-                order.volume_remaining = order.volume - ws_vol_exec
+                # volume_remaining is calculated dynamically - no direct assignment needed
 
                 # Update cost and fees
-                if ws_cost > 0:
-                    order.cost = ws_cost
-                if ws_fee > 0:
-                    order.fee = ws_fee
+                #if ws_cost > 0:
+                #    order.cost = ws_cost
+                #if ws_fee > 0:
+                #    order.fee = ws_fee
 
                 # Update fill percentage
                 if order.volume > 0:
                     order.fill_percentage = float((order.volume_executed / order.volume) * 100)
 
-            # Update order state based on WebSocket status
+            # Update order.current_state based on WebSocket status
             new_state = self._map_websocket_status_to_state(ws_status, order.volume_executed, order.volume)
 
             if new_state != old_state:
@@ -977,7 +977,7 @@ class OrderManager(LoggerMixin):
                 status=ws_status,
                 vol_exec=str(ws_vol_exec),
                 old_state=old_state.value,
-                new_state=order.state.value
+                new_state=order.current_state.value
             )
 
         except Exception as e:
@@ -1063,7 +1063,7 @@ class OrderManager(LoggerMixin):
             order: The order to transition
             new_state: The new state to transition to
         """
-        old_state = order.state
+        old_state = order.current_state
 
         # Validate transition
         if not OrderStateMachine.is_valid_transition(old_state, new_state):
@@ -1075,8 +1075,8 @@ class OrderManager(LoggerMixin):
             )
             return
 
-        # Update order state
-        order.state = new_state
+        # Update order.current_state
+        order.current_state = new_state
         order.last_update = datetime.now()
 
         # Update indices
@@ -1092,8 +1092,37 @@ class OrderManager(LoggerMixin):
             new_state=new_state.value
         )
 
+    def _get_event_for_transition(self, old_state: OrderState, new_state: OrderState) -> OrderEvent:
+        """
+        Get appropriate event for state transition.
+
+        Args:
+            old_state: Previous order.current_state
+            new_state: New order.current_state
+
+        Returns:
+            Appropriate OrderEvent for the transition
+        """
+        # Map state transitions to events
+        if new_state == OrderState.OPEN and old_state == OrderState.PENDING_SUBMIT:
+            return OrderEvent.CONFIRM
+        elif new_state == OrderState.PARTIALLY_FILLED:
+            return OrderEvent.PARTIAL_FILL
+        elif new_state == OrderState.FILLED:
+            return OrderEvent.FULL_FILL
+        elif new_state == OrderState.CANCELED:
+            return OrderEvent.CANCEL_CONFIRM
+        elif new_state == OrderState.REJECTED:
+            return OrderEvent.REJECT
+        elif new_state == OrderState.EXPIRED:
+            return OrderEvent.EXPIRE
+        elif new_state == OrderState.FAILED:
+            return OrderEvent.FAIL
+        else:
+            return OrderEvent.RESET
+
     def _update_statistics_for_state_change(self, old_state: OrderState, new_state: OrderState) -> None:
-        """Update statistics when order state changes."""
+        """Update statistics when order.current_state changes."""
         if new_state == OrderState.FILLED:
             self._stats['orders_filled'] += 1
             self._stats['last_fill_time'] = datetime.now()
@@ -1124,7 +1153,7 @@ class OrderManager(LoggerMixin):
         for order in orders:
             orders_data.append({
                 "order_id": order.order_id,
-                "state": order.state.value,
+                "state": order.current_state.value,
                 "pair": order.pair,
                 "type": order.type,
                 "volume": str(order.volume),

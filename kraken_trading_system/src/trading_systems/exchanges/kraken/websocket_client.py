@@ -1,6 +1,6 @@
 """
 Enhanced Kraken WebSocket client with OrderManager integration.
-This enhancement adds real-time order state updates and order event propagation.
+This enhancement adds real-time order.current_state updates and order event propagation.
 
 Task 3.1.C: Integrate OrderManager with WebSocket client
 """
@@ -138,15 +138,15 @@ class KrakenWebSocketClient(LoggerMixin):
             raise
 
     async def _setup_order_event_handlers(self) -> None:
-        """Set up event handlers for order state changes."""
+        """Set up event handlers for order.current_state changes."""
         if not self.order_manager:
             return
 
-        # Add order state change handler
+        # Add order.current_state change handler
         def handle_order_state_change(order: EnhancedKrakenOrder,
                                     old_state: OrderState,
                                     new_state: OrderState) -> None:
-            """Handle order state changes from OrderManager."""
+            """Handle order.current_state changes from OrderManager."""
             self.log_info(
                 "Order state change detected",
                 order_id=order.order_id,
@@ -239,9 +239,9 @@ class KrakenWebSocketClient(LoggerMixin):
                 elif channel_name == "openOrders":
                     await self.account_manager.process_open_orders_update(data)
 
-                    # NEW: Sync order states with OrderManager
+                    # NEW: Sync order.current_states with OrderManager
                     if self._order_management_enabled and self.order_manager:
-                        await self._sync_order_states(data)
+                        await self._sync_order.current_states(data)
 
                     log_websocket_event(
                         self.logger,
@@ -303,9 +303,9 @@ class KrakenWebSocketClient(LoggerMixin):
         except Exception as e:
             self.log_error("Error processing trade fills for OrderManager", error=e)
 
-    # NEW: Sync order states with OrderManager
+    # NEW: Sync order.current_states with OrderManager
     async def _sync_order_states(self, order_data: List[Any]) -> None:
-        """Sync order states from WebSocket feed with OrderManager."""
+        """Sync order.current_states from WebSocket feed with OrderManager."""
         if not self.order_manager or len(order_data) < 2:
             return
 
@@ -314,7 +314,7 @@ class KrakenWebSocketClient(LoggerMixin):
 
             for order_id, order_info in orders_dict.items():
                 if isinstance(order_info, dict):
-                    # Update order state in OrderManager
+                    # Update order.current_state in OrderManager
                     await self.order_manager.sync_order_from_websocket(order_id, order_info)
 
                     # Trigger order update event
@@ -328,7 +328,7 @@ class KrakenWebSocketClient(LoggerMixin):
                     )
 
         except Exception as e:
-            self.log_error("Error syncing order states with OrderManager", error=e)
+            self.log_error("Error syncing order.current_states with OrderManager", error=e)
 
     # NEW: OrderManager query methods
     def get_order_status(self, order_id: str) -> Optional[Dict[str, Any]]:
@@ -342,7 +342,7 @@ class KrakenWebSocketClient(LoggerMixin):
 
         return {
             "order_id": order.order_id,
-            "state": order.state.value,
+            "state": order.current_state.value,
             "status": order.status,
             "pair": order.pair,
             "type": order.type,
@@ -350,7 +350,7 @@ class KrakenWebSocketClient(LoggerMixin):
             "volume_executed": str(order.volume_executed),
             "price": str(order.price) if order.price else None,
             "last_update": order.last_update.isoformat(),
-            "fill_percentage": f"{order.fill_percentage:.2f}%"
+            "fill_percentage": order.fill_percentage
         }
 
     def get_orders_summary(self) -> Dict[str, Any]:
@@ -365,7 +365,7 @@ class KrakenWebSocketClient(LoggerMixin):
         for order in orders:
             orders_data.append({
                 "order_id": order.order_id,
-                "state": order.state.value,
+                "state": order.current_state.value,
                 "pair": order.pair,
                 "type": order.type,
                 "volume": str(order.volume),
