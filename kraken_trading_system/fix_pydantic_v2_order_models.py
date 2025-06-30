@@ -1,4 +1,136 @@
+#!/usr/bin/env python3
 """
+Fix Pydantic V2 Compatibility for Order Models
+
+This script fixes the Pydantic v2 compatibility issues in the order_requests.py file
+by updating deprecated decorators and syntax.
+
+Issues Fixed:
+1. @root_validator -> @model_validator
+2. @validator -> @field_validator  
+3. Config class updates
+4. Field validation syntax updates
+
+Run: python3 fix_pydantic_v2_order_models.py
+"""
+
+import sys
+from pathlib import Path
+
+def fix_pydantic_v2_compatibility():
+    """Fix Pydantic v2 compatibility issues in order_requests.py."""
+    
+    print("🔧 FIXING PYDANTIC V2 COMPATIBILITY")
+    print("=" * 60)
+    
+    order_requests_path = Path("src/trading_systems/exchanges/kraken/order_requests.py")
+    
+    if not order_requests_path.exists():
+        print("❌ order_requests.py not found. Run implement_task_3_4_b_1_order_models.py first")
+        return False
+    
+    try:
+        # Read current content
+        with open(order_requests_path, 'r') as f:
+            content = f.read()
+        
+        print(f"📊 Original file size: {len(content)} characters")
+        
+        # Create backup
+        backup_path = order_requests_path.with_suffix('.py.v1_backup')
+        with open(backup_path, 'w') as f:
+            f.write(content)
+        print(f"💾 Backup created: {backup_path}")
+        
+        # Track changes
+        changes_made = []
+        
+        # Fix 1: Update imports
+        old_imports = "from pydantic import BaseModel, Field, validator, root_validator"
+        new_imports = "from pydantic import BaseModel, Field, field_validator, model_validator"
+        
+        if old_imports in content:
+            content = content.replace(old_imports, new_imports)
+            changes_made.append("Updated imports")
+            print("  ✅ Fixed imports")
+        
+        # Fix 2: Update @root_validator to @model_validator
+        content = content.replace("@root_validator", "@model_validator(mode='after')")
+        changes_made.append("Updated @root_validator")
+        print("  ✅ Fixed @root_validator decorators")
+        
+        # Fix 3: Update @validator to @field_validator
+        import re
+        
+        # Pattern for @validator('field_name')
+        validator_pattern = r"@validator\('([^']+)'\)"
+        matches = re.findall(validator_pattern, content)
+        
+        for field_name in matches:
+            old_decorator = f"@validator('{field_name}')"
+            new_decorator = f"@field_validator('{field_name}')"
+            content = content.replace(old_decorator, new_decorator)
+        
+        changes_made.append(f"Updated {len(matches)} @validator decorators")
+        print(f"  ✅ Fixed {len(matches)} @validator decorators")
+        
+        # Fix 4: Update validator function signatures for Pydantic v2
+        # In Pydantic v2, field validators receive (cls, v) instead of (cls, v, values)
+        # For model validators, the signature is (cls, model)
+        
+        # Fix root_validator function signatures
+        old_root_pattern = r"def validate_([^(]+)\(cls, values\):"
+        new_root_replacement = r"def validate_\1(cls, model):"
+        content = re.sub(old_root_pattern, new_root_replacement, content)
+        
+        # Update references to values inside root validators
+        content = content.replace("values.get(", "getattr(model, ")
+        content = content.replace("values[", "getattr(model, ")
+        content = content.replace("values = ", "# values = ")
+        content = content.replace("return values", "return model")
+        
+        changes_made.append("Updated validator function signatures")
+        print("  ✅ Fixed validator function signatures")
+        
+        # Fix 5: Update Config class for Pydantic v2
+        old_config = """class Config:
+        validate_by_name = True
+        use_enum_values = True"""
+        
+        new_config = """class Config:
+        populate_by_name = True
+        use_enum_values = True"""
+        
+        if old_config in content:
+            content = content.replace(old_config, new_config)
+            changes_made.append("Updated Config class")
+            print("  ✅ Fixed Config class")
+        
+        # Write the fixed content
+        with open(order_requests_path, 'w') as f:
+            f.write(content)
+        
+        print(f"\n📊 Updated file size: {len(content)} characters")
+        print(f"🔧 Changes made: {len(changes_made)}")
+        for change in changes_made:
+            print(f"   • {change}")
+        
+        print(f"\n✅ Pydantic v2 compatibility fixes applied to {order_requests_path}")
+        return True
+        
+    except Exception as e:
+        print(f"❌ Error fixing Pydantic compatibility: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+
+
+def create_complete_fixed_order_requests():
+    """Create a completely rewritten order_requests.py with proper Pydantic v2 syntax."""
+    
+    print("📝 Creating complete Pydantic v2 compatible order_requests.py...")
+    
+    order_requests_content = '''"""
 Enhanced Order Request/Response Models for Kraken Trading System - Task 3.4.B.1
 Pydantic V2 Compatible Version
 
@@ -245,13 +377,12 @@ class StopLossLimitOrderRequest(BaseOrderRequest):
         side = self.side
         
         if price and price2 and side:
-            # For sell stop-loss-limit: stop price should be above limit price
-            # For buy stop-loss-limit: stop price should be below limit price
-            # This is because stop-loss triggers when price moves against the position
-            if side == OrderSide.SELL and price <= price2:
-                raise ValueError("For sell stop-loss-limit: stop price must be above limit price")
-            elif side == OrderSide.BUY and price >= price2:
-                raise ValueError("For buy stop-loss-limit: stop price must be below limit price")
+            # For sell stop-loss: stop price should be below limit price
+            # For buy stop-loss: stop price should be above limit price
+            if side == OrderSide.SELL and price >= price2:
+                raise ValueError("For sell stop-loss-limit: stop price must be below limit price")
+            elif side == OrderSide.BUY and price <= price2:
+                raise ValueError("For buy stop-loss-limit: stop price must be above limit price")
         
         return self
 
@@ -745,12 +876,9 @@ def get_order_type_from_request(request: BaseOrderRequest) -> str:
 
 def serialize_order_for_api(request: BaseOrderRequest) -> Dict[str, Any]:
     """Serialize order request for Kraken API submission."""
-    # Handle enum values safely
-    side_value = request.side.value if hasattr(request.side, 'value') else str(request.side)
-    
     api_data = {
         "pair": request.pair,
-        "type": side_value,
+        "type": request.side.value,
         "ordertype": get_order_type_from_request(request),
         "volume": str(request.volume)
     }
@@ -764,15 +892,10 @@ def serialize_order_for_api(request: BaseOrderRequest) -> Dict[str, Any]:
     
     # Add optional fields
     if hasattr(request, 'time_in_force') and request.time_in_force:
-        tif_value = request.time_in_force.value if hasattr(request.time_in_force, 'value') else str(request.time_in_force)
-        api_data["timeinforce"] = tif_value
+        api_data["timeinforce"] = request.time_in_force.value
     
     if hasattr(request, 'order_flags') and request.order_flags:
-        flag_values = []
-        for flag in request.order_flags:
-            flag_value = flag.value if hasattr(flag, 'value') else str(flag)
-            flag_values.append(flag_value)
-        api_data["oflags"] = ",".join(flag_values)
+        api_data["oflags"] = ",".join([flag.value for flag in request.order_flags])
     
     if request.userref:
         api_data["userref"] = request.userref
@@ -865,3 +988,95 @@ class OrderRequestFactory:
             orders.append(iceberg_order)
         
         return orders
+'''
+
+    # Ensure directory exists
+    order_requests_dir = Path("src/trading_systems/exchanges/kraken")
+    order_requests_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Create backup of existing file if it exists
+    order_requests_path = order_requests_dir / "order_requests.py"
+    if order_requests_path.exists():
+        backup_path = order_requests_path.with_suffix('.py.v2_backup')
+        with open(backup_path, 'w') as f:
+            with open(order_requests_path, 'r') as original:
+                f.write(original.read())
+        print(f"  📦 Backup created: {backup_path}")
+    
+    # Write the Pydantic v2 compatible file
+    with open(order_requests_path, 'w') as f:
+        f.write(order_requests_content)
+    
+    print(f"  ✅ Pydantic v2 compatible order_requests.py created: {order_requests_path}")
+    return True
+
+
+def main():
+    """Main execution function."""
+    
+    print("🚀 PYDANTIC V2 COMPATIBILITY FIX FOR TASK 3.4.B.1")
+    print("=" * 70)
+    print()
+    print("Fixing Pydantic v2 compatibility issues in order_requests.py")
+    print("Key changes:")
+    print("• @root_validator -> @model_validator(mode='after')")
+    print("• @validator -> @field_validator") 
+    print("• Updated Config class: validate_by_name -> populate_by_name")
+    print("• Fixed validator function signatures")
+    print("• Updated field validation context access")
+    print()
+    
+    success_count = 0
+    total_tasks = 1
+    
+    # Create completely rewritten Pydantic v2 compatible file
+    print("📝 STEP 1: Creating Pydantic V2 Compatible Order Models")
+    print("-" * 60)
+    if create_complete_fixed_order_requests():
+        success_count += 1
+        print("✅ Pydantic v2 compatible order models created")
+    else:
+        print("❌ Failed to create Pydantic v2 compatible models")
+    
+    print()
+    print("=" * 70)
+    print("📊 PYDANTIC V2 FIX SUMMARY")
+    print("=" * 70)
+    print(f"🎯 Fix Tasks: {success_count}/{total_tasks}")
+    
+    if success_count == total_tasks:
+        print("🎉 PYDANTIC V2 COMPATIBILITY FIX COMPLETED!")
+        print()
+        print("✅ Fixed Issues:")
+        print("   • Updated all decorators to Pydantic v2 syntax")
+        print("   • Fixed @root_validator -> @model_validator(mode='after')")
+        print("   • Fixed @validator -> @field_validator with @classmethod")
+        print("   • Updated Config class for Pydantic v2")
+        print("   • Fixed validator function signatures")
+        print("   • Updated field validation context access")
+        print("   • Maintained all advanced order type functionality")
+        print()
+        print("🧪 Next Steps:")
+        print("   1. Run: python3 test_task_3_4_b_1_order_models.py")
+        print("   2. Verify all tests pass")
+        print("   3. Proceed with Task 3.4.B.1 validation")
+        
+    else:
+        print("❌ PYDANTIC V2 FIX INCOMPLETE - Manual review required")
+    
+    print("=" * 70)
+    return success_count == total_tasks
+
+
+if __name__ == "__main__":
+    try:
+        success = main()
+        sys.exit(0 if success else 1)
+    except KeyboardInterrupt:
+        print("\n\n👋 Fix interrupted by user")
+        sys.exit(1)
+    except Exception as e:
+        print(f"\n❌ Unexpected error: {e}")
+        import traceback
+        traceback.print_exc()
+        sys.exit(1)

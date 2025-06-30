@@ -1,12 +1,10 @@
 """
 Enhanced Order Request/Response Models for Kraken Trading System - Task 3.4.B.1
-Pydantic V2 Compatible Version
 
 This module provides comprehensive Pydantic models for all Kraken order types
 including advanced order types: stop-loss, take-profit, conditional, OCO, and iceberg orders.
 
 Enhanced Features:
-- Pydantic V2 compatible decorators and syntax
 - Fixed field mappings for stop-loss and take-profit orders
 - Complete OCO (One-Cancels-Other) order support
 - Iceberg order implementation with size management
@@ -20,7 +18,7 @@ from typing import Any, Dict, List, Optional, Union
 from datetime import datetime
 from enum import Enum
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, validator, root_validator
 
 from .account_models import OrderSide, OrderType, OrderStatus
 
@@ -84,21 +82,18 @@ class BaseOrderRequest(BaseModel):
     client_order_id: Optional[str] = Field(None, description="Client order ID", alias="cl_ord_id")
     validate_only: bool = Field(False, description="Validate order without placing")
 
-    model_config = {
-        "populate_by_name": True,
-        "use_enum_values": True
-    }
+    class Config:
+        validate_by_name = True
+        use_enum_values = True
 
-    @field_validator('pair')
-    @classmethod
+    @validator('pair')
     def validate_pair(cls, v):
         """Validate trading pair format."""
         if not v or len(v) < 3:
             raise ValueError("Invalid trading pair")
         return v.upper()
 
-    @field_validator('volume')
-    @classmethod
+    @validator('volume')
     def validate_volume(cls, v):
         """Validate order volume."""
         if v <= 0:
@@ -119,8 +114,7 @@ class MarketOrderRequest(BaseOrderRequest):
     time_in_force: Optional[TimeInForce] = Field(None, description="Time in force")
     order_flags: Optional[List[OrderFlags]] = Field(None, description="Order flags")
 
-    @field_validator('order_type')
-    @classmethod
+    @validator('order_type')
     def validate_order_type(cls, v):
         """Ensure order type is market."""
         if v != OrderType.MARKET:
@@ -140,16 +134,14 @@ class LimitOrderRequest(BaseOrderRequest):
     start_time: Optional[str] = Field(None, description="Scheduled start time")
     expire_time: Optional[str] = Field(None, description="Expiration time")
 
-    @field_validator('order_type')
-    @classmethod
+    @validator('order_type')
     def validate_order_type(cls, v):
         """Ensure order type is limit."""
         if v != OrderType.LIMIT:
             raise ValueError("Order type must be 'limit' for LimitOrderRequest")
         return v
 
-    @field_validator('price')
-    @classmethod
+    @validator('price')
     def validate_price(cls, v):
         """Validate limit price."""
         if v <= 0:
@@ -172,16 +164,14 @@ class StopLossOrderRequest(BaseOrderRequest):
     order_flags: Optional[List[OrderFlags]] = Field(None, description="Order flags")
     time_in_force: Optional[TimeInForce] = Field(TimeInForce.GOOD_TILL_CANCELED, description="Time in force")
 
-    @field_validator('order_type')
-    @classmethod
+    @validator('order_type')
     def validate_order_type(cls, v):
         """Ensure order type is stop-loss."""
         if v != OrderType.STOP_LOSS:
             raise ValueError("Order type must be 'stop-loss' for StopLossOrderRequest")
         return v
 
-    @field_validator('price')
-    @classmethod
+    @validator('price')
     def validate_stop_price(cls, v):
         """Validate stop price."""
         if v <= 0:
@@ -200,16 +190,14 @@ class TakeProfitOrderRequest(BaseOrderRequest):
     order_flags: Optional[List[OrderFlags]] = Field(None, description="Order flags")
     time_in_force: Optional[TimeInForce] = Field(TimeInForce.GOOD_TILL_CANCELED, description="Time in force")
 
-    @field_validator('order_type')
-    @classmethod
+    @validator('order_type')
     def validate_order_type(cls, v):
         """Ensure order type is take-profit."""
         if v != OrderType.TAKE_PROFIT:
             raise ValueError("Order type must be 'take-profit' for TakeProfitOrderRequest")
         return v
 
-    @field_validator('price')
-    @classmethod
+    @validator('price')
     def validate_take_profit_price(cls, v):
         """Validate take profit price."""
         if v <= 0:
@@ -229,31 +217,29 @@ class StopLossLimitOrderRequest(BaseOrderRequest):
     order_flags: Optional[List[OrderFlags]] = Field(None, description="Order flags")
     time_in_force: Optional[TimeInForce] = Field(TimeInForce.GOOD_TILL_CANCELED, description="Time in force")
 
-    @field_validator('order_type')
-    @classmethod
+    @validator('order_type')
     def validate_order_type(cls, v):
         """Ensure order type is stop-loss-limit."""
         if v != OrderType.STOP_LOSS_LIMIT:
             raise ValueError("Order type must be 'stop-loss-limit' for StopLossLimitOrderRequest")
         return v
 
-    @model_validator(mode='after')
-    def validate_prices(self):
+    @root_validator
+    def validate_prices(cls, values):
         """Validate stop and limit price relationship."""
-        price = self.price
-        price2 = self.price2
-        side = self.side
+        price = values.get('price')
+        price2 = values.get('price2')
+        side = values.get('side')
         
         if price and price2 and side:
-            # For sell stop-loss-limit: stop price should be above limit price
-            # For buy stop-loss-limit: stop price should be below limit price
-            # This is because stop-loss triggers when price moves against the position
-            if side == OrderSide.SELL and price <= price2:
-                raise ValueError("For sell stop-loss-limit: stop price must be above limit price")
-            elif side == OrderSide.BUY and price >= price2:
-                raise ValueError("For buy stop-loss-limit: stop price must be below limit price")
+            # For sell stop-loss: stop price should be below limit price
+            # For buy stop-loss: stop price should be above limit price
+            if side == OrderSide.SELL and price >= price2:
+                raise ValueError("For sell stop-loss-limit: stop price must be below limit price")
+            elif side == OrderSide.BUY and price <= price2:
+                raise ValueError("For buy stop-loss-limit: stop price must be above limit price")
         
-        return self
+        return values
 
 
 class ConditionalOrderRequest(BaseOrderRequest):
@@ -272,8 +258,7 @@ class ConditionalOrderRequest(BaseOrderRequest):
     order_flags: Optional[List[OrderFlags]] = Field(None, description="Order flags")
     expire_time: Optional[str] = Field(None, description="Condition expiration time")
 
-    @field_validator('condition_price')
-    @classmethod
+    @validator('condition_price')
     def validate_condition_price(cls, v):
         """Validate condition price."""
         if v <= 0:
@@ -316,11 +301,11 @@ class OCOOrderRequest(BaseModel):
     client_order_id: Optional[str] = Field(None, description="Client order ID for OCO group")
     userref: Optional[int] = Field(None, description="User reference ID")
 
-    @model_validator(mode='after')
-    def validate_oco_orders(self):
+    @root_validator
+    def validate_oco_orders(cls, values):
         """Validate OCO order configuration."""
-        primary = self.primary_order
-        secondary = self.secondary_order
+        primary = values.get('primary_order')
+        secondary = values.get('secondary_order')
         
         if primary and secondary:
             # Ensure same trading pair
@@ -335,7 +320,7 @@ class OCOOrderRequest(BaseModel):
             if primary.order_type == secondary.order_type:
                 raise ValueError("OCO orders must have different order types")
         
-        return self
+        return values
 
     @property
     def pair(self) -> str:
@@ -361,34 +346,31 @@ class IcebergOrderRequest(LimitOrderRequest):
     min_refresh_interval: Optional[int] = Field(30, description="Minimum refresh interval (seconds)")
     max_refresh_interval: Optional[int] = Field(300, description="Maximum refresh interval (seconds)")
 
-    @field_validator('display_volume')
-    @classmethod
-    def validate_display_volume(cls, v, info):
+    @validator('display_volume')
+    def validate_display_volume(cls, v, values):
         """Validate display volume against total volume."""
-        # In Pydantic v2, we need to access other fields through info.data
-        if hasattr(info, 'data') and 'volume' in info.data:
-            total_volume = info.data['volume']
-            if total_volume and v >= total_volume:
-                raise ValueError("Display volume must be less than total volume")
+        total_volume = values.get('volume')
+        if total_volume and v >= total_volume:
+            raise ValueError("Display volume must be less than total volume")
         return v
 
-    @model_validator(mode='after')
-    def validate_iceberg_config(self):
+    @root_validator
+    def validate_iceberg_config(cls, values):
         """Validate iceberg configuration."""
-        display_volume = self.display_volume
-        total_volume = self.volume
-        refresh_threshold = self.refresh_threshold
+        display_volume = values.get('display_volume')
+        total_volume = values.get('volume')
+        refresh_threshold = values.get('refresh_threshold')
         
         if display_volume and total_volume:
             # Set default refresh threshold if not specified
             if refresh_threshold is None:
-                self.refresh_threshold = display_volume * Decimal('0.1')
+                values['refresh_threshold'] = display_volume * Decimal('0.1')
             
             # Validate refresh threshold
             elif refresh_threshold >= display_volume:
                 raise ValueError("Refresh threshold must be less than display volume")
         
-        return self
+        return values
 
     def calculate_next_display_volume(self, remaining_volume: Decimal) -> Decimal:
         """Calculate next display volume for iceberg refresh."""
@@ -745,12 +727,9 @@ def get_order_type_from_request(request: BaseOrderRequest) -> str:
 
 def serialize_order_for_api(request: BaseOrderRequest) -> Dict[str, Any]:
     """Serialize order request for Kraken API submission."""
-    # Handle enum values safely
-    side_value = request.side.value if hasattr(request.side, 'value') else str(request.side)
-    
     api_data = {
         "pair": request.pair,
-        "type": side_value,
+        "type": request.side.value,
         "ordertype": get_order_type_from_request(request),
         "volume": str(request.volume)
     }
@@ -764,15 +743,10 @@ def serialize_order_for_api(request: BaseOrderRequest) -> Dict[str, Any]:
     
     # Add optional fields
     if hasattr(request, 'time_in_force') and request.time_in_force:
-        tif_value = request.time_in_force.value if hasattr(request.time_in_force, 'value') else str(request.time_in_force)
-        api_data["timeinforce"] = tif_value
+        api_data["timeinforce"] = request.time_in_force.value
     
     if hasattr(request, 'order_flags') and request.order_flags:
-        flag_values = []
-        for flag in request.order_flags:
-            flag_value = flag.value if hasattr(flag, 'value') else str(flag)
-            flag_values.append(flag_value)
-        api_data["oflags"] = ",".join(flag_values)
+        api_data["oflags"] = ",".join([flag.value for flag in request.order_flags])
     
     if request.userref:
         api_data["userref"] = request.userref
@@ -865,3 +839,5 @@ class OrderRequestFactory:
             orders.append(iceberg_order)
         
         return orders
+
+

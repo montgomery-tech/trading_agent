@@ -245,13 +245,12 @@ class StopLossLimitOrderRequest(BaseOrderRequest):
         side = self.side
         
         if price and price2 and side:
-            # For sell stop-loss-limit: stop price should be above limit price
-            # For buy stop-loss-limit: stop price should be below limit price
-            # This is because stop-loss triggers when price moves against the position
-            if side == OrderSide.SELL and price <= price2:
-                raise ValueError("For sell stop-loss-limit: stop price must be above limit price")
-            elif side == OrderSide.BUY and price >= price2:
-                raise ValueError("For buy stop-loss-limit: stop price must be below limit price")
+            # For sell stop-loss: stop price should be below limit price
+            # For buy stop-loss: stop price should be above limit price
+            if side == OrderSide.SELL and price >= price2:
+                raise ValueError("For sell stop-loss-limit: stop price must be below limit price")
+            elif side == OrderSide.BUY and price <= price2:
+                raise ValueError("For buy stop-loss-limit: stop price must be above limit price")
         
         return self
 
@@ -745,12 +744,9 @@ def get_order_type_from_request(request: BaseOrderRequest) -> str:
 
 def serialize_order_for_api(request: BaseOrderRequest) -> Dict[str, Any]:
     """Serialize order request for Kraken API submission."""
-    # Handle enum values safely
-    side_value = request.side.value if hasattr(request.side, 'value') else str(request.side)
-    
     api_data = {
         "pair": request.pair,
-        "type": side_value,
+        "type": request.side.value,
         "ordertype": get_order_type_from_request(request),
         "volume": str(request.volume)
     }
@@ -764,15 +760,10 @@ def serialize_order_for_api(request: BaseOrderRequest) -> Dict[str, Any]:
     
     # Add optional fields
     if hasattr(request, 'time_in_force') and request.time_in_force:
-        tif_value = request.time_in_force.value if hasattr(request.time_in_force, 'value') else str(request.time_in_force)
-        api_data["timeinforce"] = tif_value
+        api_data["timeinforce"] = request.time_in_force.value
     
     if hasattr(request, 'order_flags') and request.order_flags:
-        flag_values = []
-        for flag in request.order_flags:
-            flag_value = flag.value if hasattr(flag, 'value') else str(flag)
-            flag_values.append(flag_value)
-        api_data["oflags"] = ",".join(flag_values)
+        api_data["oflags"] = ",".join([flag.value for flag in request.order_flags])
     
     if request.userref:
         api_data["userref"] = request.userref
