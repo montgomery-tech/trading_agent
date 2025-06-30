@@ -1,0 +1,2 @@
+[console_scripts]
+kraken-mcp-server = trading_systems.mcp_server.main:main

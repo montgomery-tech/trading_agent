@@ -1,0 +1,49 @@
+Metadata-Version: 2.4
+Name: kraken-trading-system
+Version: 0.1.0
+Summary: MCP Trading System with Kraken WebSocket Integration
+Home-page: https://github.com/example/kraken-trading-system
+Author: Trading System Team
+Author-email: Trading System Team <team@example.com>
+License: MIT
+Project-URL: Homepage, https://github.com/example/kraken-trading-system
+Project-URL: Repository, https://github.com/example/kraken-trading-system
+Project-URL: Documentation, https://kraken-trading-system.readthedocs.io
+Classifier: Development Status :: 3 - Alpha
+Classifier: Intended Audience :: Financial and Insurance Industry
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3.9
+Classifier: Programming Language :: Python :: 3.10
+Classifier: Programming Language :: Python :: 3.11
+Classifier: Programming Language :: Python :: 3.12
+Requires-Python: >=3.9
+Description-Content-Type: text/markdown
+Requires-Dist: websockets>=12.0
+Requires-Dist: aiohttp>=3.9.0
+Requires-Dist: python-dotenv>=1.0.0
+Requires-Dist: pydantic>=2.5.0
+Requires-Dist: pydantic-settings>=2.1.0
+Requires-Dist: structlog>=23.2.0
+Requires-Dist: pandas>=2.1.0
+Requires-Dist: numpy>=1.24.0
+Requires-Dist: cryptography>=41.0.0
+Requires-Dist: httpx>=0.25.0
+Requires-Dist: mcp[cli]>=1.0.0
+Provides-Extra: dev
+Requires-Dist: pytest>=7.4.0; extra == "dev"
+Requires-Dist: pytest-asyncio>=0.21.0; extra == "dev"
+Requires-Dist: pytest-cov>=4.1.0; extra == "dev"
+Requires-Dist: pytest-mock>=3.12.0; extra == "dev"
+Requires-Dist: black>=23.0.0; extra == "dev"
+Requires-Dist: flake8>=6.0.0; extra == "dev"
+Requires-Dist: mypy>=1.7.0; extra == "dev"
+Requires-Dist: isort>=5.12.0; extra == "dev"
+Provides-Extra: docs
+Requires-Dist: mkdocs>=1.5.0; extra == "docs"
+Requires-Dist: mkdocs-material>=9.4.0; extra == "docs"
+Dynamic: author
+Dynamic: home-page
+Dynamic: requires-python
+
+# Kraken Trading System

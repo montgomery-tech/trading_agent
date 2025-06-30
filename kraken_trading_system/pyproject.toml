@@ -23,6 +23,7 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
 ]
 dependencies = [
+    # Existing trading system dependencies
     "websockets>=12.0",
     "aiohttp>=3.9.0",
     "python-dotenv>=1.0.0",
@@ -33,6 +34,9 @@ dependencies = [
     "numpy>=1.24.0",
     "cryptography>=41.0.0",
     "httpx>=0.25.0",
+    
+    # NEW: MCP SDK Dependencies
+    "mcp[cli]>=1.0.0",
 ]
 
 [project.optional-dependencies]
@@ -55,6 +59,10 @@ docs = [
 Homepage = "https://github.com/example/kraken-trading-system"
 Repository = "https://github.com/example/kraken-trading-system"
 Documentation = "https://kraken-trading-system.readthedocs.io"
+
+# NEW: MCP Server Entry Point
+[project.scripts]
+kraken-mcp-server = "trading_systems.mcp_server.main:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -81,7 +89,7 @@ extend-exclude = '''
 profile = "black"
 multi_line_output = 3
 line_length = 88
-known_first_party = ["trading_system"]
+known_first_party = ["trading_systems"]
 
 [tool.mypy]
 python_version = "3.9"
@@ -103,5 +111,5 @@ testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
-addopts = "-v --cov=src/trading_system --cov-report=html --cov-report=term-missing"
+addopts = "-v --cov=src/trading_systems --cov-report=html --cov-report=term-missing"
 asyncio_mode = "auto"
