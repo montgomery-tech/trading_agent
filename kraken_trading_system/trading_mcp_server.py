@@ -195,13 +195,13 @@ async def server_shutdown():
 # MAIN ENTRY POINT
 # =============================================================================
 
-async def main():
+def main():  # ✅ Remove 'async' 
     """Main server function."""
     try:
-        await server_startup()
+        # Run startup in async context
+        asyncio.run(server_startup())
         
-        # Run the FastMCP server
-        # Note: mcp.run() is blocking, so startup must happen before
+        # Now mcp.run() can work properly
         mcp.run()
         
     except KeyboardInterrupt:
@@ -209,7 +209,7 @@ async def main():
     except Exception as e:
         print(f"❌ Server error: {e}")
     finally:
-        await server_shutdown()
+        asyncio.run(server_shutdown())
 
 if __name__ == "__main__":
     # For direct testing
@@ -229,4 +229,4 @@ if __name__ == "__main__":
         asyncio.run(test_server())
     else:
         # Normal server run for Claude Desktop
-        asyncio.run(main())
+        main()
