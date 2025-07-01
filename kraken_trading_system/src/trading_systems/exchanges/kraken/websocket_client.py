@@ -76,7 +76,7 @@ class KrakenWebSocketClient(LoggerMixin):
 
         # NEW: OrderManager integration
         self.order_manager: Optional[OrderManager] = None
-        self._order_management_enabled = False
+        self._order_management_enabled = True
         self._order_event_handlers: Dict[str, List[callable]] = {}
 
         # Get URLs from settings

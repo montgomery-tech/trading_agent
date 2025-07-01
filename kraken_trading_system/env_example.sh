@@ -1,6 +1,6 @@
 # Kraken API Configuration
-KRAKEN_API_KEY=your_api_key_here
-KRAKEN_API_SECRET=your_api_secret_here
+KRAKEN_API_KEY=17fs+mq1TA6BTMxhGw94CIWW5N4gvIlWXmES98vJ9H+eyqxcCYrRgWfS
+KRAKEN_API_SECRET=pQfGzxr+mutTAOdXYRhgaCIPFJQKIfBzLzOtAngzGhpswskeHuAxjAyvD+bHoARPl5kJPBrDwf5oaaypuZtLOA==
 
 # WebSocket Configuration
 KRAKEN_WS_PUBLIC_URL=wss://ws.kraken.com

@@ -69,7 +69,7 @@ class MCPServerConfig:
     performance: MCPPerformanceConfig = field(default_factory=MCPPerformanceConfig)
     
     # Feature flags
-    enable_real_trading: bool = field(default=True)  # Start in safe mode
+    enable_real_trading: bool = field(default=False)  # Start in safe mode
     enable_advanced_orders: bool = field(default=False)  # Advanced order types
     enable_analytics: bool = field(default=True)  # Analytics and reporting
     enable_risk_management: bool = field(default=True)  # Risk checks
