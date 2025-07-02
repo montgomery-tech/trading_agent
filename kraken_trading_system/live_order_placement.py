@@ -125,6 +125,20 @@ class LiveETHSellOrder:
                 return False
             
             print("✅ Connected to live Kraken account")
+            
+            # Ensure OrderManager is initialized for order placement
+            if self.websocket_client._order_management_enabled:
+                if not self.websocket_client.order_manager:
+                    print("🔧 Initializing OrderManager for live orders...")
+                    await self.websocket_client.initialize_order_manager()
+                    print("✅ OrderManager initialized successfully")
+                else:
+                    print("✅ OrderManager already initialized")
+            else:
+                print("⚠️ Order management not enabled - enabling now...")
+                self.websocket_client._order_management_enabled = True
+                await self.websocket_client.initialize_order_manager()
+                print("✅ OrderManager enabled and initialized")
             print("✅ Authentication successful")
             print("✅ Private WebSocket active")
             
@@ -242,11 +256,58 @@ class LiveETHSellOrder:
             #     amount=self.order_amount_eth
             # )
             
-            print("   ⚠️ ACTUAL ORDER PLACEMENT CODE NOT IMPLEMENTED")
-            print("   💡 This requires enabling the order management system")
-            print("   🔧 Simulating successful order for testing...")
-            
-            await self._simulate_order_placement()
+            try:
+                # Place actual market order via WebSocket
+                order_result = await self.websocket_client.place_market_order(
+                    pair=self.test_symbol,
+                    side="sell",
+                    volume=self.order_amount_eth,
+                    userref=int(time.time())  # Use timestamp as user reference
+                )
+                
+                if order_result["success"]:
+                    order_id = order_result["order_id"]
+                    description = order_result["description"]
+                    
+                    print(f"   ✅ LIVE ORDER PLACED SUCCESSFULLY!")
+                    print(f"   📋 Order ID: {order_id}")
+                    print(f"   📋 Description: {description}")
+                    
+                    # Store order details for monitoring
+                    self.placed_order_id = order_id
+                    self.order_status = "submitted"
+                    
+                    # Monitor the order
+                    # Use real-time WebSocket monitoring instead of polling
+                    monitoring_result = await self.websocket_client.monitor_order_realtime(
+                        order_id, timeout=30.0
+                    )
+                    
+                    if monitoring_result["completed"]:
+                        print(f"   ✅ Order completed in {monitoring_result['monitoring_time']:.1f}s")
+                        print(f"   📊 Status: {monitoring_result['status']}")
+                        if monitoring_result.get('fill_info'):
+                            fill_info = monitoring_result['fill_info']
+                            print(f"   💰 Fill: {fill_info}")
+                        
+                        # Set order status for final display
+                        self.order_status = "filled" if monitoring_result['status'] == "filled" else "completed"
+                        self.placed_order_id = order_id
+                    else:
+                        print(f"   ⚠️ Order monitoring: {monitoring_result['status']}")
+                        self.order_status = "timeout" if monitoring_result['status'] == "timeout" else "unknown"
+                    
+                else:
+                    error_msg = order_result.get("error", "Unknown error")
+                    print(f"   ❌ ORDER PLACEMENT FAILED: {error_msg}")
+                    return False
+                    
+            except Exception as e:
+                print(f"   ❌ ORDER PLACEMENT EXCEPTION: {e}")
+                import traceback
+                traceback.print_exc()
+                print("   🔧 Falling back to simulation for safety...")
+                await self._simulate_order_placement()
             return True
             
         except Exception as e:
@@ -299,6 +360,8 @@ class LiveETHSellOrder:
         else:
             print("⚠️ Order status unclear")
             return False
+    
+    
     
     async def cleanup(self):
         """Clean up connections."""
@@ -364,9 +427,10 @@ class LiveETHSellOrder:
             print("✅ Conservative approach: MAINTAINED")
             print()
             
-            if self.enable_live_orders and self.order_status == "FILLED":
+            if self.enable_live_orders and hasattr(self, 'order_status') and self.order_status in ["filled", "completed"]:
                 print("🎯 LIVE ORDER SUCCESSFULLY EXECUTED!")
                 print("💰 You have sold ETH and received USD")
+                print("⚡ Real-time monitoring: WORKING")
             else:
                 print("🔧 SIMULATION COMPLETED SUCCESSFULLY!")
                 print("💡 Enable production mode for live orders")

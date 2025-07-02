@@ -1,6 +1,6 @@
 """
 Enhanced Kraken WebSocket client with OrderManager integration.
-This enhancement adds real-time order state updates and order event propagation.
+This enhancement adds real-time order.current_state updates and order event propagation.
 
 Task 3.1.C: Integrate OrderManager with WebSocket client
 """
@@ -84,13 +84,12 @@ class KrakenWebSocketClient(LoggerMixin):
         self.public_url, self.private_url = settings.get_websocket_urls()
 
         log_websocket_event(
-            self.logger,
-            "client_initialized",
-            public_url=self.public_url,
-            private_url=self.private_url,
-            ssl_context_type=type(self.ssl_context).__name__,
-            order_management_enabled=self._order_management_enabled
-        )
+                        self.logger,
+                        "unknown_private_data",
+                        channel="unknown",
+                        data_type=type(data).__name__,
+                        data_preview=str(data)[:200] if isinstance(data, (dict, list)) else None
+                    ).__name__,
 
     def _create_ssl_context(self) -> ssl.SSLContext:
         """Create SSL context with proper certificate handling."""
@@ -139,15 +138,15 @@ class KrakenWebSocketClient(LoggerMixin):
             raise
 
     async def _setup_order_event_handlers(self) -> None:
-        """Set up event handlers for order state changes."""
+        """Set up event handlers for order.current_state changes."""
         if not self.order_manager:
             return
 
-        # Add order state change handler
+        # Add order.current_state change handler
         def handle_order_state_change(order: EnhancedKrakenOrder,
                                     old_state: OrderState,
                                     new_state: OrderState) -> None:
-            """Handle order state changes from OrderManager."""
+            """Handle order.current_state changes from OrderManager."""
             self.log_info(
                 "Order state change detected",
                 order_id=order.order_id,
@@ -208,7 +207,7 @@ class KrakenWebSocketClient(LoggerMixin):
             except ValueError:
                 self.log_warning(f"Handler not found for {event_type}")
 
-    # FIXED: _process_private_data method with proper channel processing
+    # ENHANCED: _process_private_data method with OrderManager integration
     async def _process_private_data(self, data: Dict[str, Any]) -> None:
         """Process private data feeds (ownTrades, openOrders) with OrderManager integration."""
         try:
@@ -220,10 +219,9 @@ class KrakenWebSocketClient(LoggerMixin):
 
             # Determine message type and route to appropriate processor
             if isinstance(data, list) and len(data) >= 3:
-                # FIXED: Properly extract channel name from WebSocket message
-                channel_name = data[1] if len(data) > 1 else "unknown"
+                "unknown" == data[2] if len(data) > 2 else None
 
-                if channel_name == "ownTrades":
+                if "unknown" == "ownTrades":
                     await self.account_manager.process_own_trades_update(data)
 
                     # NEW: Trigger order fill processing if OrderManager is enabled
@@ -233,22 +231,22 @@ class KrakenWebSocketClient(LoggerMixin):
                     log_websocket_event(
                         self.logger,
                         "private_trades_processed",
-                        channel=channel_name,
+                        channel="unknown",
                         data_elements=len(data[1]) if isinstance(data[1], dict) else 0,
                         order_manager_notified=self._order_management_enabled
                     )
 
-                elif channel_name == "openOrders":
+                elif "unknown" == "openOrders":
                     await self.account_manager.process_open_orders_update(data)
 
-                    # FIXED: Sync order states with OrderManager
+                    # NEW: Sync order.current_states with OrderManager
                     if self._order_management_enabled and self.order_manager:
-                        await self._sync_order_states(data)
+                        await self._sync_order.current_states(data)
 
                     log_websocket_event(
                         self.logger,
                         "private_orders_processed",
-                        channel=channel_name,
+                        channel="unknown",
                         data_elements=len(data[1]) if isinstance(data[1], dict) else 0,
                         order_manager_synced=self._order_management_enabled
                     )
@@ -258,9 +256,8 @@ class KrakenWebSocketClient(LoggerMixin):
                     log_websocket_event(
                         self.logger,
                         "unknown_private_data",
-                        channel=channel_name,
-                        data_type=type(data).__name__,
-                        data_preview=str(data)[:200] if isinstance(data, (dict, list)) else None
+                        channel="unknown",
+                        data_type=type(data).__name__
                     )
 
             elif isinstance(data, dict):
@@ -306,9 +303,9 @@ class KrakenWebSocketClient(LoggerMixin):
         except Exception as e:
             self.log_error("Error processing trade fills for OrderManager", error=e)
 
-    # FIXED: Sync order states with OrderManager
+    # NEW: Sync order.current_states with OrderManager
     async def _sync_order_states(self, order_data: List[Any]) -> None:
-        """Sync order states from WebSocket feed with OrderManager."""
+        """Sync order.current_states from WebSocket feed with OrderManager."""
         if not self.order_manager or len(order_data) < 2:
             return
 
@@ -317,7 +314,7 @@ class KrakenWebSocketClient(LoggerMixin):
 
             for order_id, order_info in orders_dict.items():
                 if isinstance(order_info, dict):
-                    # Update order state in OrderManager
+                    # Update order.current_state in OrderManager
                     await self.order_manager.sync_order_from_websocket(order_id, order_info)
 
                     # Trigger order update event
@@ -331,7 +328,7 @@ class KrakenWebSocketClient(LoggerMixin):
                     )
 
         except Exception as e:
-            self.log_error("Error syncing order states with OrderManager", error=e)
+            self.log_error("Error syncing order.current_states with OrderManager", error=e)
 
     # NEW: OrderManager query methods
     def get_order_status(self, order_id: str) -> Dict[str, Any]:
@@ -354,7 +351,7 @@ class KrakenWebSocketClient(LoggerMixin):
             "price": str(order.price) if order.price else None,
             "last_update": order.last_update.isoformat(),
             "fill_percentage": order.fill_percentage
-        }
+    }
 
     def get_orders_summary(self) -> Dict[str, Any]:
         """Get summary of all orders from OrderManager."""
@@ -430,6 +427,9 @@ class KrakenWebSocketClient(LoggerMixin):
             })
 
         return base_status
+
+    # Keep all existing methods from the original file...
+    # (All other methods remain unchanged)
 
     async def get_account_snapshot(self) -> Optional[AccountSnapshot]:
         """Get current account state snapshot."""
@@ -880,7 +880,8 @@ class KrakenWebSocketClient(LoggerMixin):
             # Create order in OrderManager
             order = await self.order_manager.create_order(creation_request)
             
-            # Store Kraken order ID in order metadata
+            # Update with Kraken order ID
+            # Store Kraken order ID in order metadata instead
             order.metadata = order.metadata or {}
             order.metadata['kraken_order_id'] = order_id
             order.status = "submitted"
@@ -893,6 +894,9 @@ class KrakenWebSocketClient(LoggerMixin):
             
         except Exception as e:
             self.log_error("Failed to register order with OrderManager", error=e, order_id=order_id)
+    
+    # ===== END ORDER PLACEMENT METHODS =====
+
 
     # ===== REAL-TIME ORDER MONITORING =====
     
@@ -979,14 +983,7 @@ class KrakenWebSocketClient(LoggerMixin):
                     if isinstance(message, (dict, list)):
                         # Log message type for debugging
                         if isinstance(message, list) and len(message) >= 3:
-                            channel = message[2] if len(message) > 2 else 'unknown'
-                            self.log_info(f"Processing message: {channel}")
-                        
-                        # Debug logging for message format
-                        if isinstance(message, list) and len(message) >= 2:
-                            self.log_info(f"WebSocket message format: channel={message[1] if len(message) > 1 else 'unknown'}, data_type={type(message[0])}")
-                            if len(message) > 1 and message[1] in ["ownTrades", "openOrders"]:
-                                self.log_info(f"Order-related message: {message}")
+                            self.log_info(f"Processing message: {message[2] if len(message) > 2 else 'unknown'}")
                         
                         # Check for order status updates
                         if self._is_order_update(message, order_id):
@@ -1035,114 +1032,6 @@ class KrakenWebSocketClient(LoggerMixin):
                 "error": str(e),
                 "monitoring_time": asyncio.get_event_loop().time() - start_time
             }
-
-    def _is_order_update(self, message: Dict[str, Any], order_id: str) -> bool:
-        """Check if message is an update for our order."""
-        try:
-            # Handle list format messages from WebSocket feeds
-            # Format: [[{data}, ...], "channelName"]
-            if isinstance(message, list) and len(message) >= 2:
-                channel_name = message[1] if len(message) > 1 else None
-                data_array = message[0] if len(message) > 0 else []
-                
-                # ownTrades messages: [[{trade_id: {trade_data}}, ...], "ownTrades"]
-                if channel_name == "ownTrades" and isinstance(data_array, list):
-                    for trade_dict in data_array:
-                        if isinstance(trade_dict, dict):
-                            for trade_id, trade_info in trade_dict.items():
-                                if isinstance(trade_info, dict):
-                                    if trade_info.get("ordertxid") == order_id:
-                                        return True
-                
-                # openOrders messages: [[{order_id: {order_data}}, ...], "openOrders"]
-                elif channel_name == "openOrders" and isinstance(data_array, list):
-                    for order_dict in data_array:
-                        if isinstance(order_dict, dict):
-                            if order_id in order_dict:
-                                return True
-            
-            # Handle direct dict format messages (subscription confirmations, etc.)
-            elif isinstance(message, dict):
-                # Check if it's a subscription confirmation or order status
-                if message.get("event") in ["subscriptionStatus", "addOrderStatus"]:
-                    return False  # These aren't order updates
-                
-                # Check for order data in the message
-                if "ordertxid" in message and message.get("ordertxid") == order_id:
-                    return True
-            
-            return False
-            
-        except Exception as e:
-            self.log_error("Error checking order update", error=e)
-            return False
-
-    def _process_order_update(self, message: Dict[str, Any], order_id: str) -> tuple:
-        """
-        Process order update message.
-        
-        Returns:
-            (status, completed, fill_info)
-        """
-        try:
-            # Handle list format messages: [[{data}, ...], "channelName"]
-            if isinstance(message, list) and len(message) >= 2:
-                channel_name = message[1] if len(message) > 1 else None
-                data_array = message[0] if len(message) > 0 else []
-                
-                # Process ownTrades (execution/fill updates)
-                if channel_name == "ownTrades" and isinstance(data_array, list):
-                    for trade_dict in data_array:
-                        if isinstance(trade_dict, dict):
-                            for trade_id, trade_info in trade_dict.items():
-                                if isinstance(trade_info, dict) and trade_info.get("ordertxid") == order_id:
-                                    return (
-                                        "filled",
-                                        True,
-                                        {
-                                            "trade_id": trade_id,
-                                            "price": trade_info.get("price"),
-                                            "vol": trade_info.get("vol"),
-                                            "cost": trade_info.get("cost"),
-                                            "fee": trade_info.get("fee"),
-                                            "time": trade_info.get("time"),
-                                            "type": trade_info.get("type"),
-                                            "pair": trade_info.get("pair")
-                                        }
-                                    )
-                
-                # Process openOrders (status updates)
-                elif channel_name == "openOrders" and isinstance(data_array, list):
-                    for order_dict in data_array:
-                        if isinstance(order_dict, dict):
-                            order_info = order_dict.get(order_id)
-                            if order_info:
-                                status = order_info.get("status", "unknown")
-                                vol_exec = float(order_info.get("vol_exec", 0))
-                                vol = float(order_info.get("vol", 0))
-                                
-                                # Order is completed if status is closed/canceled or fully executed
-                                completed = status in ["closed", "canceled", "expired"] or vol_exec >= vol
-                                
-                                return (
-                                    status,
-                                    completed,
-                                    {
-                                        "vol_exec": vol_exec,
-                                        "vol": vol,
-                                        "status": status,
-                                        "avg_price": order_info.get("avg_price"),
-                                        "cost": order_info.get("cost"),
-                                        "fee": order_info.get("fee")
-                                    }
-                                )
-            
-            return ("unknown", False, {})
-            
-        except Exception as e:
-            self.log_error("Error processing order update", error=e, order_id=order_id)
-            return ("error", False, {"error": str(e)})
-
     async def disconnect(self, endpoint: Optional[str] = None) -> None:
         """Disconnect from WebSocket(s)."""
         try:
