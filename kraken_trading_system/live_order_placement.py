@@ -349,7 +349,7 @@ class LiveETHSellOrder:
         print(f"\n📊 ORDER MONITORING")
         print("-" * 40)
         
-        if self.order_status == "FILLED":
+        if self.order_status == "filled":
             print("✅ Order completed successfully!")
             print(f"📋 Final Results:")
             print(f"   Order ID: {self.placed_order_id}")
