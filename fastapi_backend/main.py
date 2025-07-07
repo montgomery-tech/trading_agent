@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Balance Tracking System - FastAPI Backend
-Modular main application
+Updated main application with trading pairs support
 """
 
 from fastapi import FastAPI
@@ -12,7 +12,8 @@ import logging
 
 from api.config import settings
 from api.database import DatabaseManager
-from api.routes import users, transactions, balances, currencies
+from api.routes import users, transactions, balances, currencies, trading_pairs
+from api.routes import trades  # NEW: Import trades route
 
 # Setup logging
 logging.basicConfig(
@@ -26,7 +27,7 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     """Application lifespan manager"""
     logger.info("🚀 Starting Balance Tracking API...")
-    
+
     # Initialize database
     db = DatabaseManager(settings.DATABASE_URL)
     try:
@@ -36,9 +37,9 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"❌ Database initialization failed: {e}")
         raise
-    
+
     yield
-    
+
     # Cleanup
     logger.info("🛑 Shutting down...")
     if hasattr(app.state, 'database'):
@@ -48,7 +49,7 @@ async def lifespan(app: FastAPI):
 # Create FastAPI app
 app = FastAPI(
     title=settings.PROJECT_NAME,
-    description="REST API for managing user balances and transactions",
+    description="REST API for managing user balances, transactions, and trading",
     version=settings.VERSION,
     lifespan=lifespan,
     docs_url="/docs",
@@ -89,6 +90,20 @@ app.include_router(
     tags=["Currencies"]
 )
 
+# NEW: Include trading pairs router
+app.include_router(
+    trading_pairs.router,
+    prefix=f"{settings.API_V1_PREFIX}/trading-pairs",
+    tags=["Trading Pairs"]
+)
+
+# NEW: Include trades router
+app.include_router(
+    trades.router,
+    prefix=f"{settings.API_V1_PREFIX}/trades",
+    tags=["Trades"]
+)
+
 
 # Root endpoints
 @app.get("/")
@@ -105,7 +120,9 @@ async def root():
             "users": f"{settings.API_V1_PREFIX}/users",
             "balances": f"{settings.API_V1_PREFIX}/balances",
             "transactions": f"{settings.API_V1_PREFIX}/transactions",
-            "currencies": f"{settings.API_V1_PREFIX}/currencies"
+            "currencies": f"{settings.API_V1_PREFIX}/currencies",
+            "trading_pairs": f"{settings.API_V1_PREFIX}/trading-pairs",  # NEW
+            "trades": f"{settings.API_V1_PREFIX}/trades"  # NEW
         }
     }
 
@@ -117,7 +134,7 @@ async def health_check():
         db = app.state.database
         db.test_connection()
         stats = db.get_stats()
-        
+
         return {
             "status": "healthy",
             "timestamp": datetime.utcnow().isoformat(),
@@ -139,11 +156,13 @@ async def health_check():
 
 if __name__ == "__main__":
     import uvicorn
-    
+
     print(f"🚀 Starting {settings.PROJECT_NAME}...")
     print("📚 API Documentation: http://localhost:8000/docs")
     print("🏥 Health Check: http://localhost:8000/health")
-    
+    print("🔗 Trading Pairs: http://localhost:8000/api/v1/trading-pairs")
+    print("💱 Trades: http://localhost:8000/api/v1/trades")
+
     uvicorn.run(
         "main:app",
         host="127.0.0.1",

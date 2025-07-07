@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """
-Working Trading Agent with Proper MCP Integration
+agent_1 Trading Client (Fixed)
 
-This agent properly connects to your MCP server and executes real trades.
+This AI agent connects as agent_1 to the trading server and demonstrates
+real trading capabilities including balance checking, market analysis, and trade execution.
 
-Usage: python3 working_trading_agent.py
+Usage: python3 fixed_agent_client.py
 
-Make sure the MCP server is running first:
-python3 consolidated_mcp_server.py --http
+Make sure the agent-focused trading server is running first:
+python3 agent_focused_trading_server.py --http
 """
 
 import asyncio
@@ -26,323 +27,446 @@ except ImportError as e:
     print("❌ Missing httpx. Install with: pip install httpx")
     sys.exit(1)
 
-# Simple MCP client implementation
-class SimpleMCPClient:
-    """Simplified MCP client that works with your server."""
+# Enhanced MCP client for agent_1
+class Agent1MCPClient:
+    """MCP client specifically designed for agent_1 trading."""
 
     def __init__(self, server_url: str):
         self.server_url = server_url
-        self.http_client = httpx.AsyncClient(timeout=30.0)
+        self.http_client = httpx.AsyncClient(timeout=60.0)
+        self.request_id = 1
 
     async def call_tool(self, tool_name: str, arguments: Dict[str, Any] = None) -> str:
-        """Call an MCP tool via HTTP POST."""
+        """Call an MCP tool via the direct MCP endpoint."""
         try:
-            # Create MCP-style request
+            # Create proper MCP JSON-RPC request
             request_data = {
                 "jsonrpc": "2.0",
-                "id": 1,
+                "id": self.request_id,
                 "method": "tools/call",
                 "params": {
                     "name": tool_name,
                     "arguments": arguments or {}
                 }
             }
+            self.request_id += 1
 
-            # Send to MCP endpoint
+            # Try the direct MCP endpoint first
             response = await self.http_client.post(
-                f"{self.server_url}/sse",
+                f"{self.server_url}/mcp",
                 json=request_data,
-                headers={"Content-Type": "application/json"}
+                headers={
+                    "Content-Type": "application/json",
+                    "Accept": "application/json"
+                }
             )
 
             if response.status_code == 200:
-                result = response.json()
-                return result.get("result", {}).get("content", [{}])[0].get("text", "No result")
+                try:
+                    result = response.json()
+
+                    # Handle MCP response format
+                    if "result" in result:
+                        tool_result = result["result"]
+
+                        # Handle MCP content format
+                        if isinstance(tool_result, dict) and "content" in tool_result:
+                            content = tool_result["content"]
+                            if isinstance(content, list) and len(content) > 0:
+                                return content[0].get("text", str(tool_result))
+                            else:
+                                return str(content)
+                        else:
+                            return str(tool_result)
+                    elif "error" in result:
+                        return f"❌ MCP Error: {result['error']['message']}"
+                    else:
+                        return str(result)
+
+                except json.JSONDecodeError:
+                    # If JSON parsing fails, return the raw text
+                    return response.text
             else:
-                return f"HTTP Error {response.status_code}: {response.text}"
+                return f"❌ HTTP Error {response.status_code}: {response.text[:200]}"
 
         except Exception as e:
-            return f"Tool call error: {str(e)}"
+            return f"❌ Tool call error: {str(e)}"
+
+    async def health_check(self) -> bool:
+        """Check server health."""
+        try:
+            response = await self.http_client.get(f"{self.server_url}/health")
+            return response.status_code == 200
+        except:
+            return False
 
     async def close(self):
         """Close the client."""
         await self.http_client.aclose()
 
 
-class WorkingTradingAgent:
+class Agent1TradingBot:
     """
-    A working trading agent that properly connects to your MCP server
-    and executes real trades through your trading system.
+    AI Trading Bot that operates as agent_1.
+    Demonstrates realistic trading scenarios and decision-making.
     """
 
     def __init__(self, server_url: str = "http://localhost:8000"):
         self.server_url = server_url
-        self.health_endpoint = f"{server_url}/health"
-
-        # Agent properties
-        self.agent_name = "WorkingTradingAgent"
+        self.agent_name = "agent_1"
         self.mcp_client = None
-        self.http_client = None
 
         # Trading state
+        self.current_balances = {}
         self.trade_history = []
+        self.market_data = {}
         self.connected = False
 
-        # Safety settings
-        self.max_trade_usd = 20.0  # Conservative $20 limit
-        self.max_trades_per_session = 3
-        self.trade_count = 0
-
     async def initialize(self):
-        """Initialize the agent and connections."""
-        print(f"🤖 Initializing {self.agent_name}...")
+        """Initialize the trading bot."""
+        print(f"🤖 Initializing {self.agent_name} Trading Bot...")
         print(f"   Target server: {self.server_url}")
 
-        # Create HTTP client for health checks
-        self.http_client = httpx.AsyncClient(timeout=30.0)
+        self.mcp_client = Agent1MCPClient(self.server_url)
 
         # Check server connectivity
-        connected = await self.check_server_health()
+        connected = await self.mcp_client.health_check()
         if not connected:
-            raise ConnectionError("Cannot connect to MCP server")
-
-        # Create simplified MCP client
-        self.mcp_client = SimpleMCPClient(self.server_url)
+            raise ConnectionError("Cannot connect to agent-focused trading server")
 
         self.connected = True
-        print(f"✅ {self.agent_name} initialized successfully")
-
-    async def check_server_health(self) -> bool:
-        """Check if the MCP server is running and healthy."""
-        print("🔍 Checking server health...")
-
-        try:
-            response = await self.http_client.get(self.health_endpoint)
-            if response.status_code == 200:
-                health_data = response.json()
-                print(f"✅ Server healthy: {health_data.get('server', 'Unknown')}")
-                return True
-            else:
-                print(f"❌ Server health check failed: {response.status_code}")
-                return False
-        except Exception as e:
-            print(f"❌ Cannot reach server: {e}")
-            print("💡 Make sure the MCP server is running:")
-            print("   python3 consolidated_mcp_server.py --http")
-            return False
+        print(f"✅ {self.agent_name} connected and ready for trading!")
 
     # =============================================================================
-    # DIRECT MCP TOOL CALLS
+    # CORE TRADING FUNCTIONS
     # =============================================================================
 
-    async def ping_server(self) -> str:
-        """Test server connectivity."""
-        print("🏓 Pinging server...")
-        result = await self.mcp_client.call_tool("ping")
-        print(f"📨 Server response: {result}")
+    async def check_my_balances(self) -> str:
+        """Check current balances and update internal state."""
+        print("💰 Checking my current balances...")
+        result = await self.mcp_client.call_tool("get_my_balances")
+        print(f"📊 Balance result: {result[:150]}...")
         return result
 
-    async def get_account_balance(self) -> str:
-        """Get current account balance."""
-        print("💰 Getting account balance...")
-        result = await self.mcp_client.call_tool("get_account_balance")
-        print(f"📊 Balance result: {result[:200]}..." if len(result) > 200 else result)
+    async def get_market_price(self, symbol: str) -> str:
+        """Get current market price for a symbol."""
+        print(f"📈 Getting market price for {symbol}...")
+        result = await self.mcp_client.call_tool("get_market_price", {"symbol": symbol})
+        print(f"💹 Price result: {result[:100]}...")
         return result
 
-    async def get_eth_price(self) -> str:
-        """Get current ETH price."""
-        print("📈 Getting ETH price...")
-        result = await self.mcp_client.call_tool("get_eth_price")
-        print(f"💹 Price result: {result[:200]}..." if len(result) > 200 else result)
+    async def get_portfolio_summary(self) -> str:
+        """Get comprehensive portfolio summary."""
+        print("📊 Getting portfolio summary...")
+        result = await self.mcp_client.call_tool("get_portfolio_summary")
+        print(f"📈 Portfolio: {result[:150]}...")
         return result
 
-    async def buy_eth(self, amount_usd: float) -> str:
-        """Buy ETH with USD."""
-        print(f"📈 Buying ${amount_usd} worth of ETH...")
-
-        # Safety check
-        if amount_usd > self.max_trade_usd:
-            error_msg = f"❌ Amount ${amount_usd} exceeds safety limit of ${self.max_trade_usd}"
-            print(error_msg)
-            return error_msg
-
-        if self.trade_count >= self.max_trades_per_session:
-            error_msg = f"❌ Max trades ({self.max_trades_per_session}) reached for this session"
-            print(error_msg)
-            return error_msg
-
-        result = await self.mcp_client.call_tool("buy_eth", {
-            "amount_usd": amount_usd,
-            "order_type": "market"
+    async def buy_asset(self, symbol: str, amount_usd: float) -> str:
+        """Execute a buy order."""
+        print(f"🟢 Executing BUY: ${amount_usd} of {symbol}")
+        result = await self.mcp_client.call_tool("buy_asset", {
+            "symbol": symbol,
+            "amount_usd": amount_usd
         })
 
-        # Log the trade
-        self.trade_count += 1
-        self.trade_history.append({
-            "timestamp": datetime.now().isoformat(),
-            "action": "buy",
-            "amount_usd": amount_usd,
-            "result": result[:100] + "..." if len(result) > 100 else result
-        })
+        if "✅" in result:
+            print("✅ Buy order successful!")
+        else:
+            print(f"❌ Buy order failed: {result[:100]}")
 
-        print(f"✅ Buy order result: {result[:200]}..." if len(result) > 200 else result)
         return result
 
-    async def sell_eth(self, amount_eth: float) -> str:
-        """Sell ETH for USD."""
-        print(f"📉 Selling {amount_eth} ETH...")
-
-        # Safety check
-        if self.trade_count >= self.max_trades_per_session:
-            error_msg = f"❌ Max trades ({self.max_trades_per_session}) reached for this session"
-            print(error_msg)
-            return error_msg
-
-        result = await self.mcp_client.call_tool("sell_eth", {
-            "amount_eth": amount_eth,
-            "order_type": "market"
+    async def sell_asset(self, symbol: str, amount: float) -> str:
+        """Execute a sell order."""
+        print(f"🔴 Executing SELL: {amount} of {symbol}")
+        result = await self.mcp_client.call_tool("sell_asset", {
+            "symbol": symbol,
+            "amount": amount
         })
 
-        # Log the trade
-        self.trade_count += 1
-        self.trade_history.append({
-            "timestamp": datetime.now().isoformat(),
-            "action": "sell",
-            "amount_eth": amount_eth,
-            "result": result[:100] + "..." if len(result) > 100 else result
-        })
+        if "✅" in result:
+            print("✅ Sell order successful!")
+        else:
+            print(f"❌ Sell order failed: {result[:100]}")
 
-        print(f"✅ Sell order result: {result[:200]}..." if len(result) > 200 else result)
         return result
 
-    async def get_order_status(self) -> str:
-        """Get order status."""
-        print("📋 Getting order status...")
-        result = await self.mcp_client.call_tool("get_order_status")
-        print(f"📊 Order status: {result[:200]}..." if len(result) > 200 else result)
+    async def execute_smart_trade(self, command: str) -> str:
+        """Execute a natural language trading command."""
+        print(f"🧠 Executing smart trade: '{command}'")
+        result = await self.mcp_client.call_tool("execute_smart_trade", {"command": command})
+        print(f"💡 Smart trade result: {result[:150]}...")
         return result
 
-    async def execute_trading_prompt(self, prompt: str) -> str:
-        """Execute a natural language trading prompt."""
-        print(f"🤖 Processing prompt: '{prompt}'")
-        result = await self.mcp_client.call_tool("execute_trading_prompt", {
-            "prompt": prompt
-        })
-        print(f"✅ Prompt result: {result[:200]}..." if len(result) > 200 else result)
+    async def debug_agent_info(self) -> str:
+        """Get debug information about agent connection."""
+        print("🔍 Getting agent debug info...")
+        result = await self.mcp_client.call_tool("debug_agent_info")
+        print(f"🔍 Debug result: {result[:200]}...")
+        return result
+        """Get trading history."""
+        print("📋 Getting my trading history...")
+        result = await self.mcp_client.call_tool("get_my_trades")
+        print(f"📈 Trade history: {result[:100]}...")
         return result
 
     # =============================================================================
-    # DEMO WORKFLOWS
+    # TRADING STRATEGIES & DEMOS
     # =============================================================================
 
-    async def run_connectivity_test(self):
-        """Test basic connectivity and tool access."""
-        print("🧪 CONNECTIVITY TEST")
-        print("=" * 50)
+    async def run_portfolio_check(self):
+        """Run a comprehensive portfolio check."""
+        print("📊 PORTFOLIO CHECK")
+        print("=" * 30)
 
-        # Test ping
-        await self.ping_server()
-        print()
+        # Check balances
+        await self.check_my_balances()
+        await asyncio.sleep(1)
 
-        # Test account balance
-        await self.get_account_balance()
-        print()
+        # Get portfolio summary
+        await self.get_portfolio_summary()
+        await asyncio.sleep(1)
 
-        # Test price check
-        await self.get_eth_price()
-        print()
+        # Check recent trades
+        await self.get_my_trades()
 
-        print("✅ Connectivity test complete!")
+        print("✅ Portfolio check complete!")
 
-    async def run_trading_demo(self):
-        """Run a safe trading demonstration."""
-        print("🎭 TRADING DEMO")
-        print("=" * 50)
-        print(f"Safety limits: ${self.max_trade_usd} per trade, {self.max_trades_per_session} trades max")
-        print()
+    async def run_market_analysis(self):
+        """Analyze current market conditions."""
+        print("📈 MARKET ANALYSIS")
+        print("=" * 25)
 
-        # Step 1: Check account
-        print("Step 1: Check account balance")
-        await self.get_account_balance()
-        print()
+        symbols = ['BTCUSD', 'ETHUSD', 'SOLUSD', 'ADAUSD']
 
-        # Step 2: Check price
-        print("Step 2: Check current ETH price")
-        await self.get_eth_price()
-        print()
+        for symbol in symbols:
+            await self.get_market_price(symbol)
+            await asyncio.sleep(0.5)
 
-        # Step 3: Small buy order
-        print("Step 3: Place small buy order")
-        await self.buy_eth(5.0)  # $5 buy order
-        print()
+        print("✅ Market analysis complete!")
 
-        # Step 4: Check order status
-        print("Step 4: Check order status")
-        await self.get_order_status()
-        print()
+    async def run_conservative_trading_demo(self):
+        """Run a conservative trading demonstration."""
+        print("🛡️ CONSERVATIVE TRADING DEMO")
+        print("=" * 35)
 
-        # Step 5: Small sell order
-        print("Step 5: Place small sell order")
-        await self.sell_eth(0.002)  # 0.002 ETH sell order
-        print()
+        # Check current balances first
+        await self.check_my_balances()
 
-        print("✅ Trading demo complete!")
+        # Small buy order
+        print("\n1. Small Bitcoin purchase...")
+        await self.buy_asset("BTCUSD", 50.0)  # $50 BTC purchase
+        await asyncio.sleep(2)
 
-    async def run_natural_language_demo(self):
-        """Demonstrate natural language processing."""
-        print("🗣️ NATURAL LANGUAGE DEMO")
-        print("=" * 50)
+        # Check balance after purchase
+        await self.check_my_balances()
+        await asyncio.sleep(1)
 
-        prompts = [
-            "What is my account balance?",
-            "What's the current price of ETH?",
-            "Buy $3 worth of ETH",
-            "Check my recent orders",
-            "Sell 0.001 ETH"
+        # Small Ethereum purchase
+        print("\n2. Small Ethereum purchase...")
+        await self.buy_asset("ETHUSD", 75.0)  # $75 ETH purchase
+        await asyncio.sleep(2)
+
+        # Portfolio summary
+        print("\n3. Updated portfolio...")
+        await self.get_portfolio_summary()
+
+        print("✅ Conservative trading demo complete!")
+
+    async def run_smart_trading_demo(self):
+        """Demonstrate natural language trading."""
+        print("🧠 SMART TRADING DEMO")
+        print("=" * 30)
+
+        commands = [
+            "show my balance",
+            "buy $25 of solana",
+            "get bitcoin price",
+            "buy $30 worth of ethereum",
+            "show my portfolio summary",
         ]
 
-        for i, prompt in enumerate(prompts, 1):
-            print(f"Demo {i}/{len(prompts)}: '{prompt}'")
-            await self.execute_trading_prompt(prompt)
-            print()
-            await asyncio.sleep(1)  # Brief pause
+        for i, command in enumerate(commands, 1):
+            print(f"\n{i}. Command: '{command}'")
+            await self.execute_smart_trade(command)
+            await asyncio.sleep(2)
 
-        print("✅ Natural language demo complete!")
+        print("✅ Smart trading demo complete!")
 
-    async def run_interactive_mode(self):
-        """Run interactive command mode."""
-        print("🎮 INTERACTIVE MODE")
-        print("=" * 50)
-        print("Type commands or 'quit' to exit")
-        print("Examples: 'check balance', 'buy $2 ETH', 'get price'")
+    async def run_profit_taking_demo(self):
+        """Demonstrate profit-taking strategy."""
+        print("💰 PROFIT TAKING DEMO")
+        print("=" * 25)
+
+        # Check current holdings
+        await self.get_portfolio_summary()
+        await asyncio.sleep(1)
+
+        # Smart sell commands
+        sell_commands = [
+            "sell 25% of my bitcoin",
+            "sell half my ethereum",
+            "sell 0.1 ethereum"
+        ]
+
+        for i, command in enumerate(sell_commands, 1):
+            print(f"\n{i}. Executing: '{command}'")
+            result = await self.execute_smart_trade(command)
+
+            # Only proceed if we have assets to sell
+            if "Insufficient" in result or ("No" in result and "balance" in result):
+                print("   ⚠️ Skipping - insufficient balance")
+            else:
+                await asyncio.sleep(2)
+
+        # Final portfolio check
+        print("\nFinal portfolio after profit taking:")
+        await self.get_portfolio_summary()
+
+        print("✅ Profit taking demo complete!")
+
+    async def run_interactive_trading_session(self):
+        """Run an interactive trading session."""
+        print("🎮 INTERACTIVE TRADING SESSION")
+        print("=" * 40)
+        print("Available commands:")
+        print("  'balance' - Check my balances")
+        print("  'portfolio' - Portfolio summary")
+        print("  'debug' - Debug agent connection info")
+        print("  'price <asset>' - Get asset price (btc, eth, sol, ada)")
+        print("  'buy $X <asset>' - Buy asset with USD")
+        print("  'sell X <asset>' - Sell amount of asset")
+        print("  'trades' - My trade history")
+        print("  'smart: <command>' - Natural language trading")
+        print("  'quit' - Exit session")
         print()
 
         while True:
             try:
-                command = input("Trading command: ").strip()
-                if command.lower() in ['quit', 'exit', 'q']:
+                command = input("agent_1> ").strip().lower()
+
+                if command in ['quit', 'exit', 'q']:
                     break
-                if command:
-                    await self.execute_trading_prompt(command)
-                    print()
+
+                if command == 'balance':
+                    await self.check_my_balances()
+
+                elif command == 'portfolio':
+                    await self.get_portfolio_summary()
+
+                elif command == 'debug':
+                    await self.debug_agent_info()
+
+                elif command.startswith('price'):
+                    parts = command.split()
+                    if len(parts) > 1:
+                        asset = parts[1].upper()
+                        symbol_map = {
+                            'BTC': 'BTCUSD', 'BITCOIN': 'BTCUSD',
+                            'ETH': 'ETHUSD', 'ETHEREUM': 'ETHUSD',
+                            'SOL': 'SOLUSD', 'SOLANA': 'SOLUSD',
+                            'ADA': 'ADAUSD', 'CARDANO': 'ADAUSD'
+                        }
+                        symbol = symbol_map.get(asset, f"{asset}USD")
+                        await self.get_market_price(symbol)
+                    else:
+                        print("Usage: price <asset> (btc, eth, sol, ada)")
+
+                elif command.startswith('buy'):
+                    # Parse: buy $50 btc
+                    parts = command.split()
+                    if len(parts) >= 3:
+                        try:
+                            amount_str = parts[1].replace('$', '')
+                            amount = float(amount_str)
+                            asset = parts[2].upper()
+                            symbol_map = {
+                                'BTC': 'BTCUSD', 'BITCOIN': 'BTCUSD',
+                                'ETH': 'ETHUSD', 'ETHEREUM': 'ETHUSD',
+                                'SOL': 'SOLUSD', 'SOLANA': 'SOLUSD',
+                                'ADA': 'ADAUSD', 'CARDANO': 'ADAUSD'
+                            }
+                            symbol = symbol_map.get(asset, f"{asset}USD")
+                            await self.buy_asset(symbol, amount)
+                        except ValueError:
+                            print("Usage: buy $<amount> <asset>")
+                    else:
+                        print("Usage: buy $<amount> <asset>")
+
+                elif command.startswith('sell'):
+                    # Parse: sell 0.1 btc
+                    parts = command.split()
+                    if len(parts) >= 3:
+                        try:
+                            amount = float(parts[1])
+                            asset = parts[2].upper()
+                            symbol_map = {
+                                'BTC': 'BTCUSD', 'BITCOIN': 'BTCUSD',
+                                'ETH': 'ETHUSD', 'ETHEREUM': 'ETHUSD',
+                                'SOL': 'SOLUSD', 'SOLANA': 'SOLUSD',
+                                'ADA': 'ADAUSD', 'CARDANO': 'ADAUSD'
+                            }
+                            symbol = symbol_map.get(asset, f"{asset}USD")
+                            await self.sell_asset(symbol, amount)
+                        except ValueError:
+                            print("Usage: sell <amount> <asset>")
+                    else:
+                        print("Usage: sell <amount> <asset>")
+
+                elif command == 'trades':
+                    await self.get_my_trades()
+
+                elif command.startswith('smart:'):
+                    smart_command = command[6:].strip()
+                    await self.execute_smart_trade(smart_command)
+
+                else:
+                    print("Unknown command. Type 'quit' to exit.")
+
+                print()  # Add spacing
+
             except KeyboardInterrupt:
-                print("\n⚠️ Exiting interactive mode...")
+                print("\n⚠️ Exiting interactive session...")
                 break
+            except Exception as e:
+                print(f"❌ Error: {e}")
+
+    async def run_full_trading_workflow(self):
+        """Run a comprehensive trading workflow demonstration."""
+        print("🚀 FULL TRADING WORKFLOW")
+        print("=" * 35)
+
+        workflows = [
+            ("Initial Portfolio Assessment", self.run_portfolio_check),
+            ("Market Analysis", self.run_market_analysis),
+            ("Conservative Trading", self.run_conservative_trading_demo),
+            ("Smart Trading Commands", self.run_smart_trading_demo),
+            ("Final Portfolio Review", self.run_portfolio_check)
+        ]
+
+        for i, (name, workflow_func) in enumerate(workflows, 1):
+            print(f"\n{'='*50}")
+            print(f"WORKFLOW {i}/{len(workflows)}: {name.upper()}")
+            print(f"{'='*50}")
+
+            await workflow_func()
+
+            if i < len(workflows):
+                print(f"\n⏸️ Workflow {i} complete. Continuing in 3 seconds...")
+                await asyncio.sleep(3)
+
+        print("\n🎉 FULL TRADING WORKFLOW COMPLETE!")
+        print("📊 Final Summary:")
+        await self.get_portfolio_summary()
 
     async def cleanup(self):
-        """Clean up agent resources."""
-        print(f"🧹 Cleaning up {self.agent_name}...")
+        """Clean up bot resources."""
+        print(f"🧹 Cleaning up {self.agent_name} Trading Bot...")
 
         if self.mcp_client:
             await self.mcp_client.close()
             print("✅ MCP client closed")
-
-        if self.http_client:
-            try:
-                await self.http_client.aclose()
-                print("✅ HTTP client closed")
-            except:
-                pass  # Ignore cleanup errors
 
         print(f"✅ {self.agent_name} cleanup complete")
 
@@ -351,71 +475,78 @@ class WorkingTradingAgent:
 # =============================================================================
 
 async def main():
-    """Main function to run the working trading agent."""
-    print("🤖 WORKING TRADING AGENT")
-    print("=" * 60)
-    print("This agent properly connects to your MCP server and")
-    print("executes REAL trades through your trading system!")
-    print("=" * 60)
+    """Main function to run agent_1 trading bot."""
+    print("🤖 AGENT_1 TRADING BOT")
+    print("=" * 50)
+    print("This AI agent operates as agent_1 and demonstrates")
+    print("real trading capabilities with balance management!")
+    print("=" * 50)
     print()
 
-    agent = WorkingTradingAgent()
+    bot = Agent1TradingBot()
 
     try:
-        # Initialize the agent
-        await agent.initialize()
+        # Initialize the bot
+        await bot.initialize()
         print()
 
         # Ask user what they want to do
-        print("🎯 Choose an option:")
-        print("   1. Connectivity test (safe)")
-        print("   2. Trading demo (small real trades)")
-        print("   3. Natural language demo")
-        print("   4. Interactive mode")
+        print("🎯 Choose a trading demonstration:")
+        print("   1. Portfolio check (safe)")
+        print("   2. Market analysis (safe)")
+        print("   3. Conservative trading demo (small trades)")
+        print("   4. Smart trading demo (natural language)")
+        print("   5. Profit taking demo (sell assets)")
+        print("   6. Full trading workflow (comprehensive)")
+        print("   7. Interactive trading session")
         print()
 
-        choice = input("Enter choice (1-4): ").strip()
+        choice = input("Enter choice (1-7): ").strip()
 
         if choice == "1":
-            await agent.run_connectivity_test()
+            await bot.run_portfolio_check()
         elif choice == "2":
+            await bot.run_market_analysis()
+        elif choice == "3":
             print("⚠️ This will execute REAL trades with small amounts!")
             confirm = input("Continue? (yes/no): ").strip().lower()
             if confirm == "yes":
-                await agent.run_trading_demo()
+                await bot.run_conservative_trading_demo()
             else:
-                print("❌ Trading demo cancelled")
-        elif choice == "3":
-            await agent.run_natural_language_demo()
+                print("❌ Demo cancelled")
         elif choice == "4":
-            await agent.run_interactive_mode()
+            await bot.run_smart_trading_demo()
+        elif choice == "5":
+            await bot.run_profit_taking_demo()
+        elif choice == "6":
+            print("⚠️ This will run a full trading workflow!")
+            confirm = input("Continue? (yes/no): ").strip().lower()
+            if confirm == "yes":
+                await bot.run_full_trading_workflow()
+            else:
+                print("❌ Workflow cancelled")
+        elif choice == "7":
+            await bot.run_interactive_trading_session()
         else:
             print("❌ Invalid choice")
 
-        print("\n📊 AGENT SESSION SUMMARY:")
-        print(f"   Trades executed: {agent.trade_count}")
-        print(f"   Trade history: {len(agent.trade_history)} entries")
-        if agent.trade_history:
-            print("   Recent trades:")
-            for trade in agent.trade_history[-3:]:
-                action = trade.get('action', 'unknown')
-                timestamp = trade.get('timestamp', 'unknown')
-                if 'amount_usd' in trade:
-                    amount = f"${trade['amount_usd']}"
-                elif 'amount_eth' in trade:
-                    amount = f"{trade['amount_eth']} ETH"
-                else:
-                    amount = "unknown amount"
-                print(f"     {timestamp}: {action} {amount}")
+        print(f"\n📊 AGENT_1 SESSION SUMMARY:")
+        print(f"   Connected as: {bot.agent_name}")
+        print(f"   Server: {bot.server_url}")
+        print(f"   Status: {'Connected' if bot.connected else 'Disconnected'}")
+
+        # Final portfolio check
+        print("\n📈 Final Portfolio Status:")
+        await bot.get_portfolio_summary()
 
     except KeyboardInterrupt:
-        print("\n⚠️ Agent interrupted by user")
+        print(f"\n⚠️ {bot.agent_name} interrupted by user")
     except Exception as e:
-        print(f"\n❌ Agent error: {e}")
+        print(f"\n❌ {bot.agent_name} error: {e}")
         import traceback
         traceback.print_exc()
     finally:
-        await agent.cleanup()
+        await bot.cleanup()
 
 if __name__ == "__main__":
     asyncio.run(main())

@@ -1,0 +1,453 @@
+#!/usr/bin/env python3
+"""
+Database Adapter for Balance Tracking
+
+This adapter connects your MCP server to the SQLite database
+containing user balances and trading data.
+
+File Location: src/trading_systems/database/balance_adapter.py
+"""
+
+import sqlite3
+import sys
+import asyncio
+from pathlib import Path
+from typing import Dict, Any, List, Optional
+from decimal import Decimal
+from datetime import datetime
+import json
+
+# Add project root to path for imports
+project_root = Path(__file__).parent.parent.parent.parent
+sys.path.insert(0, str(project_root))
+
+class DatabaseBalanceAdapter:
+    """
+    Adapter to connect MCP server to the balance tracking database.
+
+    This adapter provides:
+    - User balance queries
+    - Transaction history
+    - Account management
+    - Trading data access
+    """
+
+    def __init__(self, db_file: str = "balance_tracker.db"):
+        self.db_file = Path(project_root) / db_file
+        self.conn = None
+        self.current_user = "agent_1"  # Default test user
+
+    async def initialize(self):
+        """Initialize database connection."""
+        try:
+            if not self.db_file.exists():
+                raise FileNotFoundError(f"Database file not found: {self.db_file}")
+
+            # Create connection
+            self.conn = sqlite3.connect(str(self.db_file))
+            self.conn.row_factory = sqlite3.Row
+
+            # Test connection
+            cursor = self.conn.cursor()
+            cursor.execute("SELECT COUNT(*) FROM users")
+            user_count = cursor.fetchone()[0]
+
+            print(f"✅ Database connected: {user_count} users in database")
+
+            # Verify test user exists
+            user = await self.get_user_info(self.current_user)
+            if user:
+                print(f"✅ Test user '{self.current_user}' found in database")
+            else:
+                print(f"⚠️ Test user '{self.current_user}' not found - will create if needed")
+
+            return True
+
+        except Exception as e:
+            print(f"❌ Database initialization failed: {e}")
+            return False
+
+    async def shutdown(self):
+        """Close database connection."""
+        if self.conn:
+            self.conn.close()
+            print("✅ Database connection closed")
+
+    # =============================================================================
+    # USER MANAGEMENT
+    # =============================================================================
+
+    async def get_user_info(self, username: str) -> Optional[Dict[str, Any]]:
+        """Get user information by username."""
+        try:
+            cursor = self.conn.cursor()
+            cursor.execute("""
+                SELECT id, username, email, first_name, last_name,
+                       is_active, is_verified, created_at, last_login
+                FROM users
+                WHERE username = ?
+            """, (username,))
+
+            row = cursor.fetchone()
+            if row:
+                return {
+                    "user_id": row["id"],
+                    "username": row["username"],
+                    "email": row["email"],
+                    "first_name": row["first_name"],
+                    "last_name": row["last_name"],
+                    "is_active": bool(row["is_active"]),
+                    "is_verified": bool(row["is_verified"]),
+                    "created_at": row["created_at"],
+                    "last_login": row["last_login"]
+                }
+            return None
+
+        except Exception as e:
+            print(f"❌ Error getting user info: {e}")
+            return None
+
+    async def set_current_user(self, username: str) -> bool:
+        """Set the current user for balance operations."""
+        user = await self.get_user_info(username)
+        if user and user["is_active"]:
+            self.current_user = username
+            print(f"✅ Current user set to: {username}")
+            return True
+        else:
+            print(f"❌ User not found or inactive: {username}")
+            return False
+
+    # =============================================================================
+    # BALANCE OPERATIONS
+    # =============================================================================
+
+    async def get_user_balances(self, username: str = None) -> Dict[str, Any]:
+        """Get all balances for a user."""
+        if username is None:
+            username = self.current_user
+
+        try:
+            user = await self.get_user_info(username)
+            if not user:
+                return {"error": f"User not found: {username}"}
+
+            cursor = self.conn.cursor()
+            cursor.execute("""
+                SELECT ub.currency_code, ub.total_balance, ub.available_balance,
+                       ub.locked_balance, ub.updated_at, c.name, c.symbol, c.is_fiat
+                FROM user_balances ub
+                JOIN currencies c ON ub.currency_code = c.code
+                WHERE ub.user_id = ? AND (ub.total_balance > 0 OR ub.available_balance > 0)
+                ORDER BY c.is_fiat DESC, ub.total_balance DESC
+            """, (user["user_id"],))
+
+            balances = {}
+            for row in cursor.fetchall():
+                currency = row["currency_code"]
+                balances[currency] = {
+                    "currency_name": row["name"],
+                    "symbol": row["symbol"],
+                    "is_fiat": bool(row["is_fiat"]),
+                    "total_balance": str(row["total_balance"]),
+                    "available_balance": str(row["available_balance"]),
+                    "locked_balance": str(row["locked_balance"]),
+                    "updated_at": row["updated_at"]
+                }
+
+            return {
+                "user": user["username"],
+                "user_id": user["user_id"],
+                "balances": balances,
+                "balance_count": len(balances),
+                "timestamp": datetime.now().isoformat()
+            }
+
+        except Exception as e:
+            print(f"❌ Error getting balances: {e}")
+            return {"error": str(e)}
+
+    async def get_balance_for_currency(self, currency: str, username: str = None) -> Dict[str, Any]:
+        """Get balance for a specific currency."""
+        if username is None:
+            username = self.current_user
+
+        try:
+            user = await self.get_user_info(username)
+            if not user:
+                return {"error": f"User not found: {username}"}
+
+            cursor = self.conn.cursor()
+            cursor.execute("""
+                SELECT ub.currency_code, ub.total_balance, ub.available_balance,
+                       ub.locked_balance, ub.updated_at, c.name, c.symbol, c.is_fiat
+                FROM user_balances ub
+                JOIN currencies c ON ub.currency_code = c.code
+                WHERE ub.user_id = ? AND ub.currency_code = ?
+            """, (user["user_id"], currency.upper()))
+
+            row = cursor.fetchone()
+            if row:
+                return {
+                    "user": username,
+                    "currency": row["currency_code"],
+                    "currency_name": row["name"],
+                    "symbol": row["symbol"],
+                    "is_fiat": bool(row["is_fiat"]),
+                    "total_balance": str(row["total_balance"]),
+                    "available_balance": str(row["available_balance"]),
+                    "locked_balance": str(row["locked_balance"]),
+                    "updated_at": row["updated_at"]
+                }
+            else:
+                return {
+                    "user": username,
+                    "currency": currency.upper(),
+                    "total_balance": "0.00",
+                    "available_balance": "0.00",
+                    "locked_balance": "0.00",
+                    "message": "No balance found for this currency"
+                }
+
+        except Exception as e:
+            print(f"❌ Error getting currency balance: {e}")
+            return {"error": str(e)}
+
+    # =============================================================================
+    # TRANSACTION OPERATIONS
+    # =============================================================================
+
+    async def get_transaction_history(self, username: str = None, limit: int = 10) -> Dict[str, Any]:
+        """Get transaction history for a user."""
+        if username is None:
+            username = self.current_user
+
+        try:
+            user = await self.get_user_info(username)
+            if not user:
+                return {"error": f"User not found: {username}"}
+
+            cursor = self.conn.cursor()
+            cursor.execute("""
+                SELECT t.id, t.transaction_type, t.status, t.amount, t.currency_code,
+                       t.fee_amount, t.fee_currency_code, t.description, t.created_at,
+                       t.processed_at, c.name as currency_name, c.symbol
+                FROM transactions t
+                JOIN currencies c ON t.currency_code = c.code
+                WHERE t.user_id = ?
+                ORDER BY t.created_at DESC
+                LIMIT ?
+            """, (user["user_id"], limit))
+
+            transactions = []
+            for row in cursor.fetchall():
+                transactions.append({
+                    "transaction_id": row["id"],
+                    "type": row["transaction_type"],
+                    "status": row["status"],
+                    "amount": str(row["amount"]),
+                    "currency": row["currency_code"],
+                    "currency_name": row["currency_name"],
+                    "symbol": row["symbol"],
+                    "fee_amount": str(row["fee_amount"]) if row["fee_amount"] else "0.00",
+                    "fee_currency": row["fee_currency_code"],
+                    "description": row["description"],
+                    "created_at": row["created_at"],
+                    "processed_at": row["processed_at"]
+                })
+
+            return {
+                "user": username,
+                "transactions": transactions,
+                "transaction_count": len(transactions),
+                "timestamp": datetime.now().isoformat()
+            }
+
+        except Exception as e:
+            print(f"❌ Error getting transaction history: {e}")
+            return {"error": str(e)}
+
+    # =============================================================================
+    # TRADING OPERATIONS
+    # =============================================================================
+
+    async def record_trade(self, trade_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Record a trade in the database."""
+        try:
+            user = await self.get_user_info(self.current_user)
+            if not user:
+                return {"error": f"User not found: {self.current_user}"}
+
+            cursor = self.conn.cursor()
+
+            # Insert trade record
+            trade_id = f"trade_{int(datetime.now().timestamp() * 1000)}"
+
+            cursor.execute("""
+                INSERT INTO transactions (
+                    id, user_id, external_id, transaction_type, status,
+                    amount, currency_code, description, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                trade_id,
+                user["user_id"],
+                trade_data.get("external_id"),
+                trade_data.get("trade_type", "trade_buy"),
+                "completed",
+                str(trade_data.get("amount", 0)),
+                trade_data.get("currency", "USD"),
+                trade_data.get("description", "Automated trade"),
+                datetime.now().isoformat()
+            ))
+
+            self.conn.commit()
+
+            return {
+                "trade_id": trade_id,
+                "status": "recorded",
+                "message": "Trade recorded successfully"
+            }
+
+        except Exception as e:
+            print(f"❌ Error recording trade: {e}")
+            return {"error": str(e)}
+
+    # =============================================================================
+    # UTILITY METHODS
+    # =============================================================================
+
+    async def get_available_currencies(self) -> List[Dict[str, Any]]:
+        """Get list of available currencies."""
+        try:
+            cursor = self.conn.cursor()
+            cursor.execute("""
+                SELECT code, name, symbol, is_fiat, decimal_places
+                FROM currencies
+                WHERE is_active = 1
+                ORDER BY is_fiat DESC, code
+            """)
+
+            currencies = []
+            for row in cursor.fetchall():
+                currencies.append({
+                    "code": row["code"],
+                    "name": row["name"],
+                    "symbol": row["symbol"],
+                    "is_fiat": bool(row["is_fiat"]),
+                    "decimal_places": row["decimal_places"]
+                })
+
+            return currencies
+
+        except Exception as e:
+            print(f"❌ Error getting currencies: {e}")
+            return []
+
+    async def get_database_stats(self) -> Dict[str, Any]:
+        """Get database statistics."""
+        try:
+            cursor = self.conn.cursor()
+
+            # Get user count
+            cursor.execute("SELECT COUNT(*) FROM users WHERE is_active = 1")
+            active_users = cursor.fetchone()[0]
+
+            # Get balance records
+            cursor.execute("SELECT COUNT(*) FROM user_balances WHERE total_balance > 0")
+            balance_records = cursor.fetchone()[0]
+
+            # Get transaction count
+            cursor.execute("SELECT COUNT(*) FROM transactions")
+            transaction_count = cursor.fetchone()[0]
+
+            # Get currency count
+            cursor.execute("SELECT COUNT(*) FROM currencies WHERE is_active = 1")
+            currency_count = cursor.fetchone()[0]
+
+            return {
+                "active_users": active_users,
+                "balance_records": balance_records,
+                "total_transactions": transaction_count,
+                "active_currencies": currency_count,
+                "current_user": self.current_user,
+                "database_file": str(self.db_file),
+                "timestamp": datetime.now().isoformat()
+            }
+
+        except Exception as e:
+            print(f"❌ Error getting database stats: {e}")
+            return {"error": str(e)}
+
+# =============================================================================
+# TESTING FUNCTIONS
+# =============================================================================
+
+async def test_database_adapter():
+    """Test the database adapter functionality."""
+    print("🧪 TESTING DATABASE ADAPTER")
+    print("=" * 50)
+
+    adapter = DatabaseBalanceAdapter()
+
+    try:
+        # Initialize
+        print("1️⃣ Testing initialization...")
+        success = await adapter.initialize()
+        if not success:
+            print("❌ Initialization failed")
+            return
+
+        # Test database stats
+        print("\n2️⃣ Testing database statistics...")
+        stats = await adapter.get_database_stats()
+        print(f"✅ Database stats: {json.dumps(stats, indent=2)}")
+
+        # Test user info
+        print("\n3️⃣ Testing user lookup...")
+        user_info = await adapter.get_user_info("agent_1")
+        if user_info:
+            print(f"✅ User found: {user_info['username']} ({user_info['email']})")
+        else:
+            print("❌ Test user 'agent_1' not found")
+
+        # Test balance retrieval
+        print("\n4️⃣ Testing balance retrieval...")
+        balances = await adapter.get_user_balances("agent_1")
+        if "balances" in balances:
+            print(f"✅ Balances retrieved: {len(balances['balances'])} currencies")
+            for currency, balance in balances["balances"].items():
+                print(f"   {currency}: {balance['available_balance']} (available)")
+        else:
+            print(f"⚠️ No balances or error: {balances}")
+
+        # Test specific currency
+        print("\n5️⃣ Testing specific currency balance...")
+        usd_balance = await adapter.get_balance_for_currency("USD", "agent_1")
+        print(f"✅ USD balance: {json.dumps(usd_balance, indent=2)}")
+
+        # Test transaction history
+        print("\n6️⃣ Testing transaction history...")
+        history = await adapter.get_transaction_history("agent_1", limit=5)
+        if "transactions" in history:
+            print(f"✅ Transaction history: {len(history['transactions'])} transactions")
+        else:
+            print(f"⚠️ No transactions or error: {history}")
+
+        # Test currencies
+        print("\n7️⃣ Testing available currencies...")
+        currencies = await adapter.get_available_currencies()
+        print(f"✅ Available currencies: {len(currencies)}")
+        for curr in currencies[:5]:  # Show first 5
+            print(f"   {curr['code']}: {curr['name']} ({'Fiat' if curr['is_fiat'] else 'Crypto'})")
+
+        print("\n🎉 All database adapter tests completed!")
+
+    except Exception as e:
+        print(f"❌ Test failed: {e}")
+        import traceback
+        traceback.print_exc()
+    finally:
+        await adapter.shutdown()
+
+if __name__ == "__main__":
+    asyncio.run(test_database_adapter())
