@@ -14,15 +14,16 @@ import logging
 from api.config import settings
 from api.database import DatabaseManager
 from api.routes import users, transactions, balances, currencies
-# JWT authentication routes (from Task 1.2)
+
 from api.auth_routes import router as auth_router
 
-# NEW: Import Task 1.3 Security Framework
 from api.security import (
     create_security_middleware_stack,
     security_exception_handler,
     EnhancedErrorResponse
 )
+
+from api.security.redis_rate_limiting_backend import cleanup_redis_backend
 
 # Setup logging
 logging.basicConfig(
@@ -34,8 +35,8 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Application lifespan manager"""
-    logger.info("🚀 Starting Balance Tracking API with Authentication & Security...")
+    """Application lifespan manager with Redis integration"""
+    logger.info("🚀 Starting Balance Tracking API...")
 
     # Initialize database
     db = DatabaseManager(settings.DATABASE_URL)
@@ -43,31 +44,46 @@ async def lifespan(app: FastAPI):
         db.connect()
         app.state.database = db
         logger.info("✅ Database initialized")
-
-        # Log authentication configuration
-        logger.info(f"✅ JWT Authentication enabled")
-        logger.info(f"✅ Token expiration: {settings.JWT_EXPIRE_MINUTES} minutes")
-        logger.info(f"✅ Environment: {settings.ENVIRONMENT}")
-        logger.info(f"✅ Email verification: {'Required' if getattr(settings, 'EMAIL_ENABLED', False) else 'Disabled'}")
-
-        # NEW: Log security framework status
-        logger.info("🔒 Security Framework:")
-        logger.info(f"   • Rate limiting: {'Enabled' if getattr(settings, 'RATE_LIMIT_ENABLED', True) else 'Disabled'}")
-        logger.info(f"   • Max request size: {getattr(settings, 'MAX_REQUEST_SIZE', 10485760) / 1024 / 1024:.1f}MB")
-        logger.info(f"   • Request timeout: {getattr(settings, 'REQUEST_TIMEOUT', 30)}s")
-        logger.info(f"   • Input validation: Enabled")
-        logger.info(f"   • Security headers: Enabled")
-
     except Exception as e:
         logger.error(f"❌ Database initialization failed: {e}")
         raise
+
+    # Initialize Redis backend for rate limiting
+    try:
+        from api.security.enhanced_rate_limiting_service import rate_limiting_service
+        await rate_limiting_service.initialize_redis()
+        logger.info("✅ Redis rate limiting backend initialized")
+    except Exception as e:
+        logger.warning(f"⚠️ Redis initialization failed, using fallback: {e}")
+
+    # Log production readiness status
+    logger.info("🏭 Production Configuration Status:")
+    logger.info(f"   • Environment: {settings.ENVIRONMENT}")
+    logger.info(f"   • Database: {settings.DATABASE_TYPE}")
+    logger.info(f"   • JWT Authentication: {'Enabled' if hasattr(settings, 'SECRET_KEY') else 'Disabled'}")
+    logger.info(f"   • Rate Limiting: {'Enabled' if getattr(settings, 'RATE_LIMIT_ENABLED', True) else 'Disabled'}")
+    logger.info(f"   • Redis Backend: {'Configured' if hasattr(settings, 'RATE_LIMIT_REDIS_URL') else 'Not Configured'}")
+    logger.info(f"   • Max request size: {getattr(settings, 'MAX_REQUEST_SIZE', 10485760) / 1024 / 1024:.1f}MB")
+    logger.info(f"   • Request timeout: {getattr(settings, 'REQUEST_TIMEOUT', 30)}s")
+    logger.info(f"   • Input validation: Enabled")
+    logger.info(f"   • Security headers: Enabled")
 
     yield
 
     # Cleanup
     logger.info("🛑 Shutting down...")
+
+    # Cleanup Redis connections
+    try:
+        await cleanup_redis_backend()
+        logger.info("✅ Redis backend cleaned up")
+    except Exception as e:
+        logger.warning(f"⚠️ Redis cleanup warning: {e}")
+
+    # Cleanup database
     if hasattr(app.state, 'database'):
         app.state.database.disconnect()
+        logger.info("✅ Database disconnected")
 
 
 # Create FastAPI app
@@ -228,6 +244,65 @@ async def global_exception_handler(request, exc):
             error_code="INTERNAL_ERROR"
         ).dict()
     )
+
+# Add Redis monitoring endpoint
+@app.get("/api/redis/health")
+async def redis_health():
+    """Redis health check endpoint"""
+    try:
+        from api.security.enhanced_rate_limiting_service import rate_limiting_service
+
+        if not rate_limiting_service._redis_initialized:
+            return JSONResponse(
+                status_code=503,
+                content={
+                    "status": "error",
+                    "message": "Redis not initialized",
+                    "fallback_active": True
+                }
+            )
+
+        if not rate_limiting_service.redis_backend:
+            return JSONResponse(
+                status_code=503,
+                content={
+                    "status": "error",
+                    "message": "Redis backend not available",
+                    "fallback_active": True
+                }
+            )
+
+        # Check Redis health
+        redis_available = await rate_limiting_service.redis_backend._health_check()
+
+        if redis_available:
+            return {
+                "status": "healthy",
+                "redis_available": True,
+                "fallback_active": False,
+                "metrics": rate_limiting_service.redis_backend.get_metrics()
+            }
+        else:
+            return JSONResponse(
+                status_code=503,
+                content={
+                    "status": "degraded",
+                    "redis_available": False,
+                    "fallback_active": True,
+                    "message": "Redis unavailable, using fallback"
+                }
+            )
+
+    except Exception as e:
+        logger.error(f"Redis health check failed: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={
+                "status": "error",
+                "message": f"Health check failed: {str(e)}",
+                "fallback_active": True
+            }
+        )
 
 
 if __name__ == "__main__":
