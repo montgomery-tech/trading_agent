@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """
 Balance Tracking System - FastAPI Backend
-Updated main application with JWT authentication support
+Updated main application with JWT authentication support and Task 1.3 Security Framework
 """
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
 from datetime import datetime
 import logging
@@ -13,8 +14,15 @@ import logging
 from api.config import settings
 from api.database import DatabaseManager
 from api.routes import users, transactions, balances, currencies
-# NEW: Import authentication routes
+# JWT authentication routes (from Task 1.2)
 from api.auth_routes import router as auth_router
+
+# NEW: Import Task 1.3 Security Framework
+from api.security import (
+    create_security_middleware_stack,
+    security_exception_handler,
+    EnhancedErrorResponse
+)
 
 # Setup logging
 logging.basicConfig(
@@ -27,7 +35,7 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan manager"""
-    logger.info("🚀 Starting Balance Tracking API with Authentication...")
+    logger.info("🚀 Starting Balance Tracking API with Authentication & Security...")
 
     # Initialize database
     db = DatabaseManager(settings.DATABASE_URL)
@@ -41,6 +49,14 @@ async def lifespan(app: FastAPI):
         logger.info(f"✅ Token expiration: {settings.JWT_EXPIRE_MINUTES} minutes")
         logger.info(f"✅ Environment: {settings.ENVIRONMENT}")
         logger.info(f"✅ Email verification: {'Required' if getattr(settings, 'EMAIL_ENABLED', False) else 'Disabled'}")
+
+        # NEW: Log security framework status
+        logger.info("🔒 Security Framework:")
+        logger.info(f"   • Rate limiting: {'Enabled' if getattr(settings, 'RATE_LIMIT_ENABLED', True) else 'Disabled'}")
+        logger.info(f"   • Max request size: {getattr(settings, 'MAX_REQUEST_SIZE', 10485760) / 1024 / 1024:.1f}MB")
+        logger.info(f"   • Request timeout: {getattr(settings, 'REQUEST_TIMEOUT', 30)}s")
+        logger.info(f"   • Input validation: Enabled")
+        logger.info(f"   • Security headers: Enabled")
 
     except Exception as e:
         logger.error(f"❌ Database initialization failed: {e}")
@@ -57,14 +73,17 @@ async def lifespan(app: FastAPI):
 # Create FastAPI app
 app = FastAPI(
     title=settings.PROJECT_NAME,
-    description="REST API for managing user balances, transactions, and trading with JWT authentication",
+    description="REST API for managing user balances, transactions, and trading with JWT authentication and comprehensive security",
     version=settings.VERSION,
     lifespan=lifespan,
     docs_url="/docs",
     redoc_url="/redoc"
 )
 
-# Add CORS middleware with secure settings
+# NEW: Apply Task 1.3 Security Middleware Stack FIRST (before CORS)
+app = create_security_middleware_stack(app)
+
+# Add CORS middleware with secure settings (after security middleware)
 cors_origins = getattr(settings, 'CORS_ORIGINS', ["http://localhost:3000"])
 app.add_middleware(
     CORSMiddleware,
@@ -74,7 +93,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Include authentication routes (NEW)
+# NEW: Add enhanced exception handlers
+app.add_exception_handler(HTTPException, security_exception_handler)
+
+# Include authentication routes (from Task 1.2)
 app.include_router(
     auth_router,
     prefix=f"{settings.API_V1_PREFIX}/auth",
@@ -109,13 +131,19 @@ app.include_router(
 # Root endpoints
 @app.get("/")
 async def root():
-    """API root endpoint with authentication info"""
+    """API root endpoint with authentication and security info"""
     return {
         "message": f"{settings.PROJECT_NAME} API",
         "version": settings.VERSION,
         "status": "healthy",
         "timestamp": datetime.utcnow().isoformat(),
         "authentication": "JWT Bearer Token",
+        "security": {
+            "input_validation": "enabled",
+            "rate_limiting": "enabled" if getattr(settings, 'RATE_LIMIT_ENABLED', True) else "disabled",
+            "security_headers": "enabled",
+            "request_size_limit": f"{getattr(settings, 'MAX_REQUEST_SIZE', 10485760) / 1024 / 1024:.1f}MB"
+        },
         "documentation": "/docs",
         "endpoints": {
             "health": "/health",
@@ -138,7 +166,7 @@ async def root():
 
 @app.get("/health")
 async def health_check():
-    """Enhanced health check endpoint with authentication status"""
+    """Enhanced health check endpoint with authentication and security status"""
     try:
         db = app.state.database
         db.test_connection()
@@ -161,6 +189,14 @@ async def health_check():
                 "token_expiration_minutes": settings.JWT_EXPIRE_MINUTES,
                 "algorithm": settings.JWT_ALGORITHM
             },
+            "security": {
+                "input_validation": "enabled",
+                "rate_limiting": "enabled" if getattr(settings, 'RATE_LIMIT_ENABLED', True) else "disabled",
+                "security_headers": "enabled",
+                "cors_configured": len(getattr(settings, 'CORS_ORIGINS', [])) > 0,
+                "max_request_size_mb": getattr(settings, 'MAX_REQUEST_SIZE', 10485760) / 1024 / 1024,
+                "request_timeout_seconds": getattr(settings, 'REQUEST_TIMEOUT', 30)
+            },
             "version": settings.VERSION,
             "environment": settings.ENVIRONMENT
         }
@@ -173,6 +209,27 @@ async def health_check():
         }
 
 
+# NEW: Global exception handler for unhandled exceptions
+@app.exception_handler(Exception)
+async def global_exception_handler(request, exc):
+    """Handle all unhandled exceptions securely."""
+    logger.error(f"Unhandled exception: {exc}", exc_info=True)
+
+    # Don't leak internal errors in production
+    if settings.DEBUG:
+        error_detail = str(exc)
+    else:
+        error_detail = "Internal server error"
+
+    return JSONResponse(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        content=EnhancedErrorResponse(
+            error=error_detail,
+            error_code="INTERNAL_ERROR"
+        ).dict()
+    )
+
+
 if __name__ == "__main__":
     import uvicorn
 
@@ -181,6 +238,7 @@ if __name__ == "__main__":
     print("🏥 Health Check: http://localhost:8000/health")
     print("🔐 Authentication endpoints available at /api/v1/auth/*")
     print(f"🔑 JWT Token expiration: {settings.JWT_EXPIRE_MINUTES} minutes")
+    print("🛡️ Security Framework: Input validation, rate limiting, security headers enabled")
 
     uvicorn.run(
         "main:app",

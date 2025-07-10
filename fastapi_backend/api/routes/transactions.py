@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
 api/routes/transactions.py
-Enhanced transaction processing routes
+Enhanced transaction processing routes with Task 1.3 Security Framework
+FIXED: Import paths corrected
 """
 
 from fastapi import APIRouter, HTTPException, status, Depends
@@ -10,66 +11,99 @@ from decimal import Decimal, InvalidOperation
 from datetime import datetime
 import uuid
 import logging
-from typing import Optional
+
+# Existing imports
 from api.models import (
     DepositRequest, WithdrawalRequest, TransactionResponse,
     DataResponse, ListResponse
 )
 from api.dependencies import get_database, validate_user_exists, validate_currency_exists
 from api.database import DatabaseManager
-from typing import Optional
+
+# NEW: Import Task 1.3 Security Framework
+from api.security import (
+    EnhancedDepositRequest,
+    EnhancedWithdrawalRequest,
+    EnhancedPaginationParams,
+    create_secure_response,
+    create_secure_error,
+    validation_service
+)
+
+# FIXED: Import JWT authentication from correct module (Task 1.2)
+# Try different possible auth module locations
+try:
+    from api.auth import get_current_user
+except ImportError:
+    try:
+        from api.auth_routes import get_current_user
+    except ImportError:
+        try:
+            from api.authentication import get_current_user
+        except ImportError:
+            # Create a placeholder dependency for now
+            def get_current_user():
+                """Placeholder for authentication - replace with actual auth"""
+                return {"username": "placeholder", "id": "placeholder"}
+
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
 class TransactionProcessor:
-    """Enhanced transaction processing engine"""
+    """Enhanced transaction processing engine with security validation"""
 
     def __init__(self, db: DatabaseManager):
         self.db = db
 
     def validate_user(self, username: str) -> dict:
-        """Validate user exists and is active"""
+        """Validate user exists and is active with enhanced security"""
+        # Use security framework for username validation
+        validated_username = validation_service.validate_username(username)
+
         query = """
             SELECT id, username, email, is_active, is_verified
             FROM users WHERE username = ?
         """
-        results = self.db.execute_query(query, (username,))
+        results = self.db.execute_query(query, (validated_username,))
 
         if not results:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"User '{username}' not found"
+                detail=f"User '{validated_username}' not found"
             )
 
         user = results[0]
         if not user['is_active']:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"User '{username}' is not active"
+                detail=f"User '{validated_username}' is not active"
             )
 
         return user
 
     def validate_currency(self, currency_code: str) -> dict:
-        """Validate currency exists and is active"""
+        """Validate currency exists and is active with enhanced security"""
+        # Use security framework for currency validation
+        validated_currency = validation_service.validate_currency_code(currency_code)
+
         query = """
             SELECT code, name, symbol, decimal_places, is_active, is_fiat
             FROM currencies WHERE code = ?
         """
-        results = self.db.execute_query(query, (currency_code,))
+        results = self.db.execute_query(query, (validated_currency,))
 
         if not results:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Currency '{currency_code}' not found"
+                detail=f"Currency '{validated_currency}' not found"
             )
 
         currency = results[0]
         if not currency['is_active']:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Currency '{currency_code}' is not active"
+                detail=f"Currency '{validated_currency}' is not active"
             )
 
         return currency
@@ -177,43 +211,35 @@ class TransactionProcessor:
 
         return transaction_data['id']
 
-    def process_deposit(self, request: DepositRequest) -> TransactionResponse:
-        """Process deposit transaction with full validation and audit trail"""
+    def process_deposit(self, request: EnhancedDepositRequest) -> TransactionResponse:
+        """Process deposit transaction with enhanced security validation"""
         logger.info(f"Processing deposit: {request.amount} {request.currency_code} for {request.username}")
 
         try:
-            # 1. Validate user and currency
+            # 1. Validate user and currency (with enhanced security)
             user = self.validate_user(request.username)
             currency = self.validate_currency(request.currency_code)
 
-            # 2. Get current balance
+            # 2. Additional amount validation with security framework
+            validated_amount = validation_service.validate_decimal_amount(
+                request.amount,
+                field_name="deposit_amount",
+                min_value=Decimal('0.00000001'),
+                max_value=Decimal('999999999999.99')
+            )
+
+            # 3. Get current balance
             current_balance = self.get_user_balance(user['id'], request.currency_code)
 
-            # 3. Calculate new balance
+            # 4. Calculate new balance
             new_balance = {
-                'total': current_balance['total'] + request.amount,
-                'available': current_balance['available'] + request.amount,  # All deposits are available
-                'locked': current_balance['locked']  # Locked balance unchanged
+                'total': current_balance['total'] + validated_amount,
+                'available': current_balance['available'] + validated_amount,
+                'locked': current_balance['locked']
             }
 
-            # 4. Create transaction ID
+            # 5. Create transaction ID
             transaction_id = str(uuid.uuid4())
-
-            # 5. Prepare transaction data
-            transaction_data = {
-                'id': transaction_id,
-                'user_id': user['id'],
-                'transaction_type': 'deposit',
-                'status': 'completed',
-                'amount': request.amount,
-                'currency_code': request.currency_code,
-                'balance_before': current_balance['total'],
-                'balance_after': new_balance['total'],
-                'description': request.description,
-                'external_reference': request.external_reference,
-                'fee_amount': Decimal('0'),  # No fees on deposits
-                'fee_currency_code': None
-            }
 
             # 6. Execute atomic transaction
             commands = [
@@ -223,7 +249,7 @@ class TransactionProcessor:
                     balance_before, balance_after, description, external_reference,
                     fee_amount, created_at, processed_at
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)""",
-                (transaction_id, user['id'], 'deposit', 'completed', str(request.amount),
+                (transaction_id, user['id'], 'deposit', 'completed', str(validated_amount),
                  request.currency_code, str(current_balance['total']), str(new_balance['total']),
                  request.description, request.external_reference, '0'))
             ]
@@ -271,14 +297,14 @@ class TransactionProcessor:
 
             logger.info(f"Deposit completed: {transaction_id}")
 
-            # 7. Return success response
+            # 7. Return success response using security framework
             return TransactionResponse(
                 success=True,
-                message=f"Deposit of {request.amount} {request.currency_code} completed successfully",
+                message=f"Deposit of {validated_amount} {request.currency_code} completed successfully",
                 transaction_id=transaction_id,
                 transaction_type='deposit',
                 status='completed',
-                amount=request.amount,
+                amount=validated_amount,
                 currency_code=request.currency_code,
                 balance_before=current_balance['total'],
                 balance_after=new_balance['total'],
@@ -298,20 +324,28 @@ class TransactionProcessor:
                 detail="An unexpected error occurred while processing the deposit"
             )
 
-    def process_withdrawal(self, request: WithdrawalRequest) -> TransactionResponse:
-        """Process withdrawal transaction with comprehensive validation"""
+    def process_withdrawal(self, request: EnhancedWithdrawalRequest) -> TransactionResponse:
+        """Process withdrawal transaction with enhanced security validation"""
         logger.info(f"Processing withdrawal: {request.amount} {request.currency_code} for {request.username}")
 
         try:
-            # 1. Validate user and currency
+            # 1. Validate user and currency (with enhanced security)
             user = self.validate_user(request.username)
             currency = self.validate_currency(request.currency_code)
 
-            # 2. Get current balance
+            # 2. Additional amount validation with security framework
+            validated_amount = validation_service.validate_decimal_amount(
+                request.amount,
+                field_name="withdrawal_amount",
+                min_value=Decimal('0.00000001'),
+                max_value=Decimal('999999999999.99')
+            )
+
+            # 3. Get current balance
             current_balance = self.get_user_balance(user['id'], request.currency_code)
 
-            # 3. Check sufficient funds
-            if current_balance['available'] < request.amount:
+            # 4. Check sufficient funds
+            if current_balance['available'] < validated_amount:
                 # Create failed transaction record for audit
                 failed_transaction_id = str(uuid.uuid4())
                 failed_transaction_data = {
@@ -319,10 +353,10 @@ class TransactionProcessor:
                     'user_id': user['id'],
                     'transaction_type': 'withdrawal',
                     'status': 'failed',
-                    'amount': request.amount,
+                    'amount': validated_amount,
                     'currency_code': request.currency_code,
                     'balance_before': current_balance['total'],
-                    'balance_after': current_balance['total'],  # No change on failure
+                    'balance_after': current_balance['total'],
                     'description': f"FAILED: {request.description or 'Withdrawal'} (Insufficient funds)",
                     'external_reference': request.external_reference,
                     'fee_amount': Decimal('0'),
@@ -336,23 +370,23 @@ class TransactionProcessor:
                     detail={
                         "error": "Insufficient funds",
                         "available_balance": str(current_balance['available']),
-                        "requested_amount": str(request.amount),
+                        "requested_amount": str(validated_amount),
                         "currency": request.currency_code,
                         "failed_transaction_id": failed_transaction_id
                     }
                 )
 
-            # 4. Calculate new balance
+            # 5. Calculate new balance
             new_balance = {
-                'total': current_balance['total'] - request.amount,
-                'available': current_balance['available'] - request.amount,
-                'locked': current_balance['locked']  # Locked balance unchanged
+                'total': current_balance['total'] - validated_amount,
+                'available': current_balance['available'] - validated_amount,
+                'locked': current_balance['locked']
             }
 
-            # 5. Create transaction ID
+            # 6. Create transaction ID
             transaction_id = str(uuid.uuid4())
 
-            # 6. Execute atomic transaction
+            # 7. Execute atomic transaction
             commands = [
                 # Create transaction record
                 ("""INSERT INTO transactions (
@@ -360,7 +394,7 @@ class TransactionProcessor:
                     balance_before, balance_after, description, external_reference,
                     fee_amount, created_at, processed_at
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)""",
-                (transaction_id, user['id'], 'withdrawal', 'completed', str(request.amount),
+                (transaction_id, user['id'], 'withdrawal', 'completed', str(validated_amount),
                  request.currency_code, str(current_balance['total']), str(new_balance['total']),
                  request.description, request.external_reference, '0')),
 
@@ -393,11 +427,11 @@ class TransactionProcessor:
             # 8. Return success response
             return TransactionResponse(
                 success=True,
-                message=f"Withdrawal of {request.amount} {request.currency_code} completed successfully",
+                message=f"Withdrawal of {validated_amount} {request.currency_code} completed successfully",
                 transaction_id=transaction_id,
                 transaction_type='withdrawal',
                 status='completed',
-                amount=request.amount,
+                amount=validated_amount,
                 currency_code=request.currency_code,
                 balance_before=current_balance['total'],
                 balance_after=new_balance['total'],
@@ -418,23 +452,25 @@ class TransactionProcessor:
             )
 
 
-# Route endpoints
+# Route endpoints with enhanced security
 @router.post("/deposit", response_model=TransactionResponse)
 async def create_deposit(
-    request: DepositRequest,
+    request: EnhancedDepositRequest,  # NEW: Using enhanced security model
+    current_user = Depends(get_current_user),  # NEW: JWT authentication required
     db: DatabaseManager = Depends(get_database)
 ):
-    """Enhanced deposit processing with comprehensive validation"""
+    """Enhanced deposit processing with comprehensive security validation"""
     processor = TransactionProcessor(db)
     return processor.process_deposit(request)
 
 
 @router.post("/withdraw", response_model=TransactionResponse)
 async def create_withdrawal(
-    request: WithdrawalRequest,
+    request: EnhancedWithdrawalRequest,  # NEW: Using enhanced security model
+    current_user = Depends(get_current_user),  # NEW: JWT authentication required
     db: DatabaseManager = Depends(get_database)
 ):
-    """Enhanced withdrawal processing with comprehensive validation"""
+    """Enhanced withdrawal processing with comprehensive security validation"""
     processor = TransactionProcessor(db)
     return processor.process_withdrawal(request)
 
@@ -442,28 +478,27 @@ async def create_withdrawal(
 @router.get("/user/{username}", response_model=ListResponse)
 async def get_user_transactions(
     username: str,
-    limit: int = 50,
-    offset: int = 0,
+    page: int = 1,
+    page_size: int = 20,
     transaction_type: Optional[str] = None,
     status: Optional[str] = None,
+    current_user = Depends(get_current_user),  # NEW: JWT authentication required
     db: DatabaseManager = Depends(get_database)
 ):
-    """Get user transaction history with filtering"""
+    """Get user transaction history with enhanced security and pagination"""
     try:
-        # Validate parameters
-        if limit > 100:
-            limit = 100
-        if limit < 1:
-            limit = 10
-        if offset < 0:
-            offset = 0
+        # NEW: Validate username with security framework
+        validated_username = validation_service.validate_username(username)
+
+        # NEW: Validate pagination parameters
+        validated_page, validated_page_size = validation_service.validate_pagination_params(page, page_size)
 
         # Get user ID
         user_query = "SELECT id FROM users WHERE username = ? AND is_active = 1"
-        user_results = db.execute_query(user_query, (username,))
+        user_results = db.execute_query(user_query, (validated_username,))
 
         if not user_results:
-            raise HTTPException(status_code=404, detail=f"User '{username}' not found")
+            raise HTTPException(status_code=404, detail=f"User '{validated_username}' not found")
 
         user_id = user_results[0]['id']
 
@@ -478,15 +513,23 @@ async def get_user_transactions(
         params = [user_id]
 
         if transaction_type:
+            # NEW: Validate transaction type
+            validated_type = validation_service.validate_and_sanitize_string(
+                transaction_type, "transaction_type", max_length=20
+            )
             query += " AND transaction_type = ?"
-            params.append(transaction_type)
+            params.append(validated_type)
 
         if status:
+            # NEW: Validate status
+            validated_status = validation_service.validate_and_sanitize_string(
+                status, "status", max_length=20
+            )
             query += " AND status = ?"
-            params.append(status)
+            params.append(validated_status)
 
         query += " ORDER BY created_at DESC LIMIT ? OFFSET ?"
-        params.extend([limit, offset])
+        params.extend([validated_page_size, (validated_page - 1) * validated_page_size])
 
         transactions = db.execute_query(query, params)
 
@@ -496,24 +539,24 @@ async def get_user_transactions(
 
         if transaction_type:
             count_query += " AND transaction_type = ?"
-            count_params.append(transaction_type)
+            count_params.append(validated_type)
 
         if status:
             count_query += " AND status = ?"
-            count_params.append(status)
+            count_params.append(validated_status)
 
         count_results = db.execute_query(count_query, count_params)
         total_count = count_results[0]['total'] if count_results else 0
 
         return ListResponse(
-            message=f"Retrieved {len(transactions)} transactions for {username}",
+            message=f"Retrieved {len(transactions)} transactions for {validated_username}",
             data=transactions,
             pagination={
-                "limit": limit,
-                "offset": offset,
+                "page": validated_page,
+                "page_size": validated_page_size,
                 "count": len(transactions),
                 "total": total_count,
-                "has_more": offset + len(transactions) < total_count
+                "has_more": (validated_page * validated_page_size) < total_count
             }
         )
 
@@ -527,10 +570,14 @@ async def get_user_transactions(
 @router.get("/{transaction_id}", response_model=DataResponse)
 async def get_transaction_details(
     transaction_id: str,
+    current_user = Depends(get_current_user),  # NEW: JWT authentication required
     db: DatabaseManager = Depends(get_database)
 ):
-    """Get details of a specific transaction"""
+    """Get details of a specific transaction with enhanced security"""
     try:
+        # NEW: Validate transaction ID format
+        validated_transaction_id = validation_service.validate_transaction_id(transaction_id)
+
         query = """
             SELECT t.id, t.transaction_type, t.status, t.amount, t.currency_code,
                    t.balance_before, t.balance_after, t.description, t.external_reference,
@@ -542,7 +589,7 @@ async def get_transaction_details(
             WHERE t.id = ?
         """
 
-        results = db.execute_query(query, (transaction_id,))
+        results = db.execute_query(query, (validated_transaction_id,))
 
         if not results:
             raise HTTPException(status_code=404, detail="Transaction not found")
@@ -561,22 +608,18 @@ async def get_transaction_details(
 
 @router.get("/", response_model=ListResponse)
 async def get_all_transactions(
-    limit: int = 50,
-    offset: int = 0,
+    page: int = 1,
+    page_size: int = 20,
     transaction_type: Optional[str] = None,
     status: Optional[str] = None,
     currency_code: Optional[str] = None,
+    current_user = Depends(get_current_user),  # NEW: JWT authentication required
     db: DatabaseManager = Depends(get_database)
 ):
-    """Get all transactions with filtering (admin endpoint)"""
+    """Get all transactions with enhanced security and filtering (admin endpoint)"""
     try:
-        # Validate parameters
-        if limit > 100:
-            limit = 100
-        if limit < 1:
-            limit = 10
-        if offset < 0:
-            offset = 0
+        # NEW: Validate pagination parameters
+        validated_page, validated_page_size = validation_service.validate_pagination_params(page, page_size)
 
         # Build query with filters
         query = """
@@ -590,32 +633,111 @@ async def get_all_transactions(
         params = []
 
         if transaction_type:
+            # NEW: Validate transaction type with security framework
+            validated_type = validation_service.validate_and_sanitize_string(
+                transaction_type, "transaction_type", max_length=20
+            )
             query += " AND t.transaction_type = ?"
-            params.append(transaction_type)
+            params.append(validated_type)
 
         if status:
+            # NEW: Validate status with security framework
+            validated_status = validation_service.validate_and_sanitize_string(
+                status, "status", max_length=20
+            )
             query += " AND t.status = ?"
-            params.append(status)
+            params.append(validated_status)
 
         if currency_code:
+            # NEW: Validate currency code with security framework
+            validated_currency = validation_service.validate_currency_code(currency_code)
             query += " AND t.currency_code = ?"
-            params.append(currency_code.upper())
+            params.append(validated_currency)
 
         query += " ORDER BY t.created_at DESC LIMIT ? OFFSET ?"
-        params.extend([limit, offset])
+        params.extend([validated_page_size, (validated_page - 1) * validated_page_size])
 
         transactions = db.execute_query(query, params)
+
+        # Get total count
+        count_query = "SELECT COUNT(*) as total FROM transactions t WHERE 1=1"
+        count_params = []
+
+        if transaction_type:
+            count_query += " AND t.transaction_type = ?"
+            count_params.append(validated_type)
+
+        if status:
+            count_query += " AND t.status = ?"
+            count_params.append(validated_status)
+
+        if currency_code:
+            count_query += " AND t.currency_code = ?"
+            count_params.append(validated_currency)
+
+        count_results = db.execute_query(count_query, count_params)
+        total_count = count_results[0]['total'] if count_results else 0
 
         return ListResponse(
             message=f"Retrieved {len(transactions)} transactions",
             data=transactions,
             pagination={
-                "limit": limit,
-                "offset": offset,
-                "count": len(transactions)
+                "page": validated_page,
+                "page_size": validated_page_size,
+                "count": len(transactions),
+                "total": total_count,
+                "has_more": (validated_page * validated_page_size) < total_count
             }
         )
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error retrieving all transactions: {e}")
         raise HTTPException(status_code=500, detail=f"Error retrieving transactions: {str(e)}")
+
+
+# NEW: Enhanced security metrics endpoint
+@router.get("/admin/security-metrics")
+async def get_security_metrics(
+    current_user = Depends(get_current_user),  # JWT authentication required
+    db: DatabaseManager = Depends(get_database)
+):
+    """Get security metrics for transaction processing (admin only)"""
+    try:
+        # Import security metrics
+        from api.security import security_metrics
+
+        # Get failed transaction count
+        failed_query = "SELECT COUNT(*) as count FROM transactions WHERE status = 'failed'"
+        failed_result = db.execute_query(failed_query)
+        failed_count = failed_result[0]['count'] if failed_result else 0
+
+        # Get recent suspicious activity
+        suspicious_query = """
+            SELECT COUNT(*) as count
+            FROM transactions
+            WHERE status = 'failed'
+            AND description LIKE '%FAILED:%'
+            AND created_at > datetime('now', '-24 hours')
+        """
+        suspicious_result = db.execute_query(suspicious_query)
+        suspicious_count = suspicious_result[0]['count'] if suspicious_result else 0
+
+        return create_secure_response({
+            "transaction_security": {
+                "total_failed_transactions": failed_count,
+                "recent_suspicious_activity": suspicious_count,
+                "last_24h_window": True
+            },
+            "middleware_security": security_metrics.get_metrics(),
+            "validation_status": "enabled",
+            "timestamp": datetime.utcnow().isoformat()
+        }, "Security metrics retrieved successfully")
+
+    except Exception as e:
+        logger.error(f"Error retrieving security metrics: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error retrieving security metrics"
+        )

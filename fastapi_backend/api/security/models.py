@@ -2,16 +2,21 @@
 """
 Enhanced Pydantic models with comprehensive input validation
 Secure models for API endpoints with built-in security checks
+FIXED: Pydantic v2 compatibility
 """
 
-from pydantic import BaseModel, Field, validator, root_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from typing import Optional, List, Dict, Any, Union
 from decimal import Decimal
 from datetime import datetime
 from enum import Enum
 import re
+import logging
 
-from api.input_validation import validation_service
+# FIXED: Correct import path
+from .input_validation import validation_service
+
+logger = logging.getLogger(__name__)
 
 
 class SecureBaseModel(BaseModel):
@@ -20,20 +25,22 @@ class SecureBaseModel(BaseModel):
     All API models should inherit from this.
     """
 
-    class Config:
+    model_config = {
         # Validate assignment to catch issues during runtime
-        validate_assignment = True
+        "validate_assignment": True,
         # Use enum values instead of names
-        use_enum_values = True
-        # Allow population by field name or alias
-        allow_population_by_field_name = True
+        "use_enum_values": True,
+        # Allow population by field name or alias (Pydantic v2)
+        "populate_by_name": True,
         # JSON encoders for special types
-        json_encoders = {
+        "json_encoders": {
             Decimal: str,
             datetime: lambda v: v.isoformat()
         }
+    }
 
-    @root_validator(pre=True)
+    @model_validator(mode='before')
+    @classmethod
     def validate_object_structure(cls, values):
         """Validate the overall object structure."""
         if isinstance(values, dict):
@@ -54,15 +61,18 @@ class EnhancedTransactionRequest(SecureBaseModel):
     description: Optional[str] = Field(None, max_length=500, description="Transaction description")
     external_reference: Optional[str] = Field(None, max_length=255, description="External reference")
 
-    @validator('username')
+    @field_validator('username')
+    @classmethod
     def validate_username(cls, v):
         return validation_service.validate_username(v)
 
-    @validator('currency_code')
+    @field_validator('currency_code')
+    @classmethod
     def validate_currency_code(cls, v):
         return validation_service.validate_currency_code(v)
 
-    @validator('amount')
+    @field_validator('amount')
+    @classmethod
     def validate_amount(cls, v):
         return validation_service.validate_decimal_amount(
             v,
@@ -71,7 +81,8 @@ class EnhancedTransactionRequest(SecureBaseModel):
             max_value=Decimal('999999999999.99')
         )
 
-    @validator('description')
+    @field_validator('description')
+    @classmethod
     def validate_description(cls, v):
         if v is not None:
             return validation_service.validate_and_sanitize_string(
@@ -82,7 +93,8 @@ class EnhancedTransactionRequest(SecureBaseModel):
             )
         return v
 
-    @validator('external_reference')
+    @field_validator('external_reference')
+    @classmethod
     def validate_external_reference(cls, v):
         if v is not None:
             return validation_service.validate_and_sanitize_string(
@@ -99,7 +111,8 @@ class EnhancedDepositRequest(EnhancedTransactionRequest):
     force_create_balance: bool = Field(False, description="Create balance if it doesn't exist")
     source_account: Optional[str] = Field(None, max_length=100, description="Source account identifier")
 
-    @validator('source_account')
+    @field_validator('source_account')
+    @classmethod
     def validate_source_account(cls, v):
         if v is not None:
             return validation_service.validate_and_sanitize_string(
@@ -117,7 +130,8 @@ class EnhancedWithdrawalRequest(EnhancedTransactionRequest):
     destination_account: Optional[str] = Field(None, max_length=100, description="Destination account")
     withdrawal_address: Optional[str] = Field(None, max_length=255, description="Withdrawal address")
 
-    @validator('destination_account')
+    @field_validator('destination_account')
+    @classmethod
     def validate_destination_account(cls, v):
         if v is not None:
             return validation_service.validate_and_sanitize_string(
@@ -128,7 +142,8 @@ class EnhancedWithdrawalRequest(EnhancedTransactionRequest):
             )
         return v
 
-    @validator('withdrawal_address')
+    @field_validator('withdrawal_address')
+    @classmethod
     def validate_withdrawal_address(cls, v):
         if v is not None:
             return validation_service.validate_and_sanitize_string(
@@ -148,7 +163,8 @@ class EnhancedUserQuery(SecureBaseModel):
     """Enhanced user query parameters with validation."""
     username: str = Field(..., min_length=3, max_length=50)
 
-    @validator('username')
+    @field_validator('username')
+    @classmethod
     def validate_username(cls, v):
         return validation_service.validate_username(v)
 
@@ -159,7 +175,8 @@ class EnhancedUserUpdate(SecureBaseModel):
     last_name: Optional[str] = Field(None, max_length=100)
     email: Optional[str] = Field(None, max_length=255)
 
-    @validator('first_name', 'last_name')
+    @field_validator('first_name', 'last_name')
+    @classmethod
     def validate_names(cls, v):
         if v is not None:
             # Allow only letters, spaces, hyphens, and apostrophes
@@ -173,7 +190,8 @@ class EnhancedUserUpdate(SecureBaseModel):
             )
         return v
 
-    @validator('email')
+    @field_validator('email')
+    @classmethod
     def validate_email(cls, v):
         if v is not None:
             return validation_service.validate_email(v)
@@ -189,11 +207,13 @@ class EnhancedBalanceQuery(SecureBaseModel):
     username: str = Field(..., min_length=3, max_length=50)
     currency: Optional[str] = Field(None, min_length=3, max_length=4)
 
-    @validator('username')
+    @field_validator('username')
+    @classmethod
     def validate_username(cls, v):
         return validation_service.validate_username(v)
 
-    @validator('currency')
+    @field_validator('currency')
+    @classmethod
     def validate_currency(cls, v):
         if v is not None:
             return validation_service.validate_currency_code(v)
@@ -209,17 +229,20 @@ class EnhancedPaginationParams(SecureBaseModel):
     page: int = Field(1, ge=1, le=10000, description="Page number (1-based)")
     page_size: int = Field(20, ge=1, le=100, description="Items per page")
     sort_by: Optional[str] = Field(None, max_length=50, description="Sort field")
-    sort_order: Optional[str] = Field("desc", regex="^(asc|desc)$", description="Sort order")
+    sort_order: Optional[str] = Field("desc", pattern="^(asc|desc)$", description="Sort order")  # FIXED: regex -> pattern
 
-    @validator('page', 'page_size')
-    def validate_pagination(cls, v, field):
+    @field_validator('page', 'page_size')
+    @classmethod
+    def validate_pagination(cls, v, info):
+        field_name = info.field_name
         page, page_size = validation_service.validate_pagination_params(
-            v if field.name == 'page' else 1,
-            v if field.name == 'page_size' else 20
+            v if field_name == 'page' else 1,
+            v if field_name == 'page_size' else 20
         )
         return v
 
-    @validator('sort_by')
+    @field_validator('sort_by')
+    @classmethod
     def validate_sort_by(cls, v):
         if v is not None:
             # Only allow alphanumeric characters and underscores
@@ -243,7 +266,8 @@ class EnhancedSearchParams(SecureBaseModel):
     query: str = Field(..., min_length=1, max_length=255, description="Search query")
     filters: Optional[Dict[str, Any]] = Field(None, description="Search filters")
 
-    @validator('query')
+    @field_validator('query')
+    @classmethod
     def validate_query(cls, v):
         return validation_service.validate_and_sanitize_string(
             v,
@@ -251,7 +275,8 @@ class EnhancedSearchParams(SecureBaseModel):
             max_length=255
         )
 
-    @validator('filters')
+    @field_validator('filters')
+    @classmethod
     def validate_filters(cls, v):
         if v is not None:
             # Validate filter object structure
@@ -279,7 +304,8 @@ class EnhancedFileUpload(SecureBaseModel):
     content_type: str = Field(..., max_length=100, description="MIME content type")
     file_size: int = Field(..., ge=1, le=10485760, description="File size in bytes (max 10MB)")
 
-    @validator('filename')
+    @field_validator('filename')
+    @classmethod
     def validate_filename(cls, v):
         # Remove any path components
         filename = v.split('/')[-1].split('\\')[-1]
@@ -304,7 +330,8 @@ class EnhancedFileUpload(SecureBaseModel):
             max_length=255
         )
 
-    @validator('content_type')
+    @field_validator('content_type')
+    @classmethod
     def validate_content_type(cls, v):
         # Allow only safe content types
         safe_content_types = {
@@ -330,7 +357,8 @@ class EnhancedErrorResponse(SecureBaseModel):
     timestamp: datetime = Field(default_factory=datetime.utcnow, description="Error timestamp")
     request_id: Optional[str] = Field(None, description="Request identifier")
 
-    @validator('error')
+    @field_validator('error')
+    @classmethod
     def sanitize_error_message(cls, v):
         # Sanitize error message to prevent information leakage
         return validation_service.sanitize_log_message(v)
@@ -343,7 +371,8 @@ class EnhancedSuccessResponse(SecureBaseModel):
     data: Optional[Any] = Field(None, description="Response data")
     timestamp: datetime = Field(default_factory=datetime.utcnow, description="Response timestamp")
 
-    @validator('message')
+    @field_validator('message')
+    @classmethod
     def sanitize_message(cls, v):
         return validation_service.sanitize_log_message(v)
 
@@ -359,11 +388,11 @@ class EnhancedAPIConfigUpdate(SecureBaseModel):
     max_request_size: Optional[int] = Field(None, ge=1024, le=104857600)  # 1KB to 100MB
     request_timeout: Optional[int] = Field(None, ge=1, le=300)  # 1 to 300 seconds
 
-    @root_validator
-    def validate_config_changes(cls, values):
+    @model_validator(mode='after')
+    def validate_config_changes(self):
         """Validate configuration changes don't break the system."""
-        rate_limit = values.get('rate_limit_requests')
-        window = values.get('rate_limit_window')
+        rate_limit = self.rate_limit_requests
+        window = self.rate_limit_window
 
         if rate_limit and window:
             # Ensure rate limit isn't too restrictive
@@ -371,7 +400,7 @@ class EnhancedAPIConfigUpdate(SecureBaseModel):
             if requests_per_second < 0.1:  # Less than 1 request per 10 seconds
                 raise ValueError('Rate limit configuration is too restrictive')
 
-        return values
+        return self
 
 
 # =============================================================================
@@ -402,12 +431,14 @@ def validate_model_with_security(model_class: type, data: Dict[str, Any]) -> Any
         return model_instance
 
     except ValueError as e:
+        from fastapi import HTTPException, status
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Validation error: {str(e)}"
         )
     except Exception as e:
         logger.error(f"Model validation error: {e}")
+        from fastapi import HTTPException, status
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Data validation failed"
