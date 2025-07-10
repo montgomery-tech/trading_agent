@@ -34,62 +34,42 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 
     def _get_security_headers(self) -> Dict[str, str]:
         """Get security headers configuration."""
-        # Different CSP for development vs production
-        if settings.DEBUG:
-            # Development: Allow Swagger UI to work
-            csp_policy = (
+        base_headers = {
+            "X-Content-Type-Options": "nosniff",
+            "X-Frame-Options": "DENY",
+            "X-XSS-Protection": "1; mode=block",
+            "Referrer-Policy": "strict-origin-when-cross-origin",
+            "Permissions-Policy": "geolocation=(), microphone=(), camera=()",
+        }
+
+        # Add HSTS header for HTTPS in production
+        if getattr(settings, 'ENVIRONMENT', 'development') == 'production':
+            base_headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains; preload"
+        elif getattr(settings, 'DEBUG', True):
+            # For development/testing, add a shorter HSTS for testing purposes
+            base_headers["Strict-Transport-Security"] = "max-age=3600"
+
+        # Add CSP header (Swagger UI compatible)
+        if getattr(settings, 'DEBUG', True):
+            # Development CSP - allows Swagger UI
+            base_headers["Content-Security-Policy"] = (
                 "default-src 'self'; "
-                "script-src 'self' 'unsafe-inline' 'unsafe-eval'; "
-                "style-src 'self' 'unsafe-inline'; "
+                "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net; "
+                "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
                 "img-src 'self' data: https:; "
-                "font-src 'self'; "
-                "connect-src 'self'; "
-                "frame-ancestors 'none'"
+                "connect-src 'self' https:"
             )
         else:
-            # Production: Stricter CSP
-            csp_policy = (
+            # Production CSP - more restrictive
+            base_headers["Content-Security-Policy"] = (
                 "default-src 'self'; "
                 "script-src 'self'; "
                 "style-src 'self' 'unsafe-inline'; "
                 "img-src 'self' data:; "
-                "font-src 'self'; "
-                "connect-src 'self'; "
-                "frame-ancestors 'none'"
+                "connect-src 'self'"
             )
 
-        headers = {
-            # Prevent XSS attacks
-            "X-XSS-Protection": "1; mode=block",
-
-            # Prevent MIME type sniffing
-            "X-Content-Type-Options": "nosniff",
-
-            # Prevent clickjacking
-            "X-Frame-Options": "DENY",
-
-            # Control referrer information
-            "Referrer-Policy": "strict-origin-when-cross-origin",
-
-            # Content Security Policy (development vs production)
-            "Content-Security-Policy": csp_policy,
-
-            # Permissions Policy (formerly Feature Policy)
-            "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=()",
-
-            # Server identification
-            "Server": "Balance-Tracking-API",
-
-            # API versioning
-            "API-Version": settings.VERSION,
-        }
-
-        # Add HSTS header if HTTPS is enabled
-        if getattr(settings, 'HTTPS_ONLY', False):
-            hsts_max_age = getattr(settings, 'HSTS_MAX_AGE', 31536000)  # 1 year
-            headers["Strict-Transport-Security"] = f"max-age={hsts_max_age}; includeSubDomains; preload"
-
-        return headers
+        return base_headers
 
     async def dispatch(self, request: Request, call_next: Callable) -> Response:
         """Add security headers to all responses."""
@@ -415,6 +395,132 @@ class DNSRebindingProtectionMiddleware(BaseHTTPMiddleware):
 
         return await call_next(request)
 
+# Add this class to the existing middleware.py file
+
+class IPRateLimitMiddleware(BaseHTTPMiddleware):
+    """
+    Basic IP-based rate limiting middleware (fallback when enhanced rate limiting is unavailable).
+    """
+
+    def __init__(self, app: ASGIApp, requests_per_minute: int = 60):
+        super().__init__(app)
+        self.requests_per_minute = requests_per_minute
+        self.window_size = 60  # 1 minute window
+        self.ip_requests = defaultdict(list)
+        self.last_cleanup = time.time()
+        logger.info(f"Basic IP Rate Limiting initialized: {requests_per_minute} requests per minute")
+
+    def _cleanup_old_requests(self):
+        """Clean up old request records to prevent memory leaks."""
+        current_time = time.time()
+
+        # Only cleanup every 30 seconds to avoid overhead
+        if current_time - self.last_cleanup < 30:
+            return
+
+        cutoff_time = current_time - self.window_size
+
+        # Remove old requests for all IPs
+        for ip in list(self.ip_requests.keys()):
+            # Filter out old requests
+            self.ip_requests[ip] = [
+                req_time for req_time in self.ip_requests[ip]
+                if req_time > cutoff_time
+            ]
+
+            # Remove empty entries
+            if not self.ip_requests[ip]:
+                del self.ip_requests[ip]
+
+        self.last_cleanup = current_time
+
+    def _get_client_ip(self, request: Request) -> str:
+        """Extract client IP address from request."""
+        # Check for forwarded IP headers
+        forwarded_headers = ["X-Forwarded-For", "X-Real-IP", "CF-Connecting-IP"]
+
+        for header in forwarded_headers:
+            if header in request.headers:
+                ip = request.headers[header].split(",")[0].strip()
+                if ip:
+                    return ip
+
+        # Fallback to direct client IP
+        return request.client.host if request.client else "unknown"
+
+    async def dispatch(self, request: Request, call_next: Callable) -> Response:
+        """Apply basic IP rate limiting."""
+
+        # Skip rate limiting for documentation endpoints
+        if request.url.path in ["/docs", "/redoc", "/openapi.json"]:
+            return await call_next(request)
+
+        # Clean up old requests periodically
+        self._cleanup_old_requests()
+
+        # Get client IP
+        client_ip = self._get_client_ip(request)
+        current_time = time.time()
+        window_start = current_time - self.window_size
+
+        # Get requests for this IP in the current window
+        ip_requests = self.ip_requests[client_ip]
+
+        # Filter to only requests in the current window
+        recent_requests = [req_time for req_time in ip_requests if req_time > window_start]
+
+        # Check if limit exceeded
+        if len(recent_requests) >= self.requests_per_minute:
+            # Calculate when the rate limit will reset
+            oldest_request = min(recent_requests) if recent_requests else current_time
+            reset_time = oldest_request + self.window_size
+            retry_after = max(1, int(reset_time - current_time))
+
+            logger.warning(
+                f"Basic rate limit exceeded for IP {client_ip}: "
+                f"{len(recent_requests)} requests in last {self.window_size}s"
+            )
+
+            # Update metrics
+            security_metrics.increment_rate_limited()
+
+            response = JSONResponse(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                content={
+                    "success": False,
+                    "error": "Rate limit exceeded",
+                    "retry_after": retry_after,
+                    "limit_type": "ip_basic",
+                    "timestamp": datetime.utcnow().isoformat()
+                }
+            )
+
+            # Add rate limit headers
+            response.headers["X-RateLimit-Limit"] = str(self.requests_per_minute)
+            response.headers["X-RateLimit-Remaining"] = "0"
+            response.headers["X-RateLimit-Reset"] = str(int(reset_time))
+            response.headers["X-RateLimit-Type"] = "ip_basic"
+            response.headers["Retry-After"] = str(retry_after)
+
+            return response
+
+        # Request is allowed - record it
+        recent_requests.append(current_time)
+        self.ip_requests[client_ip] = recent_requests
+
+        # Process request normally
+        response = await call_next(request)
+
+        # Add rate limit headers to successful responses
+        remaining = self.requests_per_minute - len(recent_requests)
+        next_reset = window_start + self.window_size
+
+        response.headers["X-RateLimit-Limit"] = str(self.requests_per_minute)
+        response.headers["X-RateLimit-Remaining"] = str(remaining)
+        response.headers["X-RateLimit-Reset"] = str(int(next_reset))
+        response.headers["X-RateLimit-Type"] = "ip_basic"
+
+        return response
 
 # Factory function to create configured middleware
 def create_security_middleware_stack(app):
