@@ -4,7 +4,7 @@ Balance Tracking System - FastAPI Backend
 Updated main application with JWT authentication support and Task 1.3 Security Framework
 """
 
-from fastapi import FastAPI, HTTPException, status
+from fastapi import FastAPI, HTTPException, status, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
@@ -227,22 +227,17 @@ async def health_check():
 
 # NEW: Global exception handler for unhandled exceptions
 @app.exception_handler(Exception)
-async def global_exception_handler(request, exc):
-    """Handle all unhandled exceptions securely."""
-    logger.error(f"Unhandled exception: {exc}", exc_info=True)
-
-    # Don't leak internal errors in production
-    if settings.DEBUG:
-        error_detail = str(exc)
-    else:
-        error_detail = "Internal server error"
+async def global_exception_handler(request: Request, exc: Exception):
+    """Global exception handler for unhandled exceptions."""
+    logger.error(f"Unhandled exception: {str(exc)}")
 
     return JSONResponse(
-        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        content=EnhancedErrorResponse(
-            error=error_detail,
-            error_code="INTERNAL_ERROR"
-        ).dict()
+        status_code=500,
+        content={
+            "success": False,
+            "error": "Internal server error",
+            "timestamp": datetime.utcnow().isoformat()
+        }
     )
 
 # Add Redis monitoring endpoint

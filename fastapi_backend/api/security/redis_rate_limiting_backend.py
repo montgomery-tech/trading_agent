@@ -534,7 +534,7 @@ class RedisRateLimitingBackend:
         """Generate Redis key with proper namespacing."""
         return f"{self.key_prefix}:{key_type}:{identifier}"
 
-    async def get_counter(self, key_type: str, identifier: str) -> Optional[SlidingWindowCounter]:
+    async def get_counter(self, key_type: str, identifier: str) -> Optional[Dict[str, Any]]:
         """Get rate limit counter from Redis or fallback storage."""
         full_key = self._generate_key(key_type, identifier)
 
@@ -569,7 +569,7 @@ class RedisRateLimitingBackend:
 
         return None
 
-    async def set_counter(self, key_type: str, identifier: str, counter: SlidingWindowCounter, ttl: int = None):
+    async def set_counter(self, key_type: str, identifier: str, counter_data: Dict[str, Any], ttl: int = None):
         """Set rate limit counter in Redis or fallback storage."""
         full_key = self._generate_key(key_type, identifier)
 
