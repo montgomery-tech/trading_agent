@@ -299,6 +299,176 @@ async def redis_health():
             }
         )
 
+# Root endpoint
+@app.get("/")
+async def root():
+    """API root endpoint"""
+    return {
+        "message": f"Welcome to {settings.PROJECT_NAME}",
+        "version": settings.VERSION,
+        "status": "healthy",
+        "timestamp": datetime.utcnow().isoformat(),
+        "documentation": "/docs",
+        "endpoints": {
+            "health": "/health",
+            "users": f"{settings.API_V1_PREFIX}/users",
+            "balances": f"{settings.API_V1_PREFIX}/balances",
+            "transactions": f"{settings.API_V1_PREFIX}/transactions",
+            "currencies": f"{settings.API_V1_PREFIX}/currencies",
+            "auth": "/api/v1/auth",
+            "rate_limit_metrics": "/api/rate-limit/metrics",
+            "redis_health": "/api/redis/health"
+        }
+    }
+
+
+@app.get("/health")
+async def health_check():
+    """Health check endpoint"""
+    try:
+        db = app.state.database
+        db.test_connection()
+        stats = db.get_stats()
+
+        return {
+            "status": "healthy",
+            "timestamp": datetime.utcnow().isoformat(),
+            "database": {
+                "status": "connected",
+                "type": getattr(settings, 'DATABASE_TYPE', 'sqlite'),
+                "stats": stats
+            },
+            "redis": {
+                "status": "available" if hasattr(app.state, 'redis_available') else "unknown",
+                "message": "Redis rate limiting active"
+            },
+            "version": settings.VERSION
+        }
+    except Exception as e:
+        logger.error(f"Health check failed: {e}")
+        return JSONResponse(
+            status_code=503,
+            content={
+                "status": "unhealthy",
+                "timestamp": datetime.utcnow().isoformat(),
+                "error": str(e),
+                "version": settings.VERSION
+            }
+        )
+
+
+@app.get("/api/rate-limit/metrics")
+async def rate_limit_metrics():
+    """Rate limiting metrics endpoint"""
+    try:
+        from api.security.enhanced_rate_limiting_service import rate_limiting_service
+        metrics = rate_limiting_service.get_metrics()
+
+        # Add Redis backend metrics if available
+        redis_metrics = {}
+        if rate_limiting_service.redis_backend:
+            redis_metrics = rate_limiting_service.redis_backend.get_metrics()
+
+        return {
+            "success": True,
+            "data": {
+                **metrics,
+                "redis_backend": redis_metrics,
+                "redis_backend_initialized": rate_limiting_service._redis_initialized
+            },
+            "timestamp": datetime.utcnow().isoformat()
+        }
+    except Exception as e:
+        logger.error(f"Error retrieving rate limiting metrics: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={
+                "success": False,
+                "error": "Failed to retrieve metrics",
+                "timestamp": datetime.utcnow().isoformat()
+            }
+        )
+
+
+@app.get("/api/redis/health")
+async def redis_health():
+    """Redis health check endpoint"""
+    try:
+        from api.security.enhanced_rate_limiting_service import rate_limiting_service
+
+        if not rate_limiting_service._redis_initialized:
+            return JSONResponse(
+                status_code=503,
+                content={
+                    "status": "error",
+                    "message": "Redis not initialized",
+                    "fallback_active": True,
+                    "timestamp": datetime.utcnow().isoformat()
+                }
+            )
+
+        if not rate_limiting_service.redis_backend:
+            return JSONResponse(
+                status_code=503,
+                content={
+                    "status": "error",
+                    "message": "Redis backend not available",
+                    "fallback_active": True,
+                    "timestamp": datetime.utcnow().isoformat()
+                }
+            )
+
+        # Check Redis health
+        redis_available = await rate_limiting_service.redis_backend._health_check()
+
+        if redis_available:
+            return {
+                "status": "healthy",
+                "redis_available": True,
+                "fallback_active": False,
+                "metrics": rate_limiting_service.redis_backend.get_metrics(),
+                "timestamp": datetime.utcnow().isoformat()
+            }
+        else:
+            return JSONResponse(
+                status_code=503,
+                content={
+                    "status": "degraded",
+                    "redis_available": False,
+                    "fallback_active": True,
+                    "message": "Redis unavailable, using fallback",
+                    "timestamp": datetime.utcnow().isoformat()
+                }
+            )
+
+    except Exception as e:
+        logger.error(f"Redis health check failed: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={
+                "status": "error",
+                "message": f"Health check failed: {str(e)}",
+                "fallback_active": True,
+                "timestamp": datetime.utcnow().isoformat()
+            }
+        )
+
+
+# Global exception handler for unhandled errors
+@app.exception_handler(500)
+async def internal_server_error_handler(request: Request, exc: Exception):
+    """Handle 500 internal server errors"""
+    logger.error(f"Unhandled exception: {str(exc)}")
+
+    return JSONResponse(
+        status_code=500,
+        content={
+            "success": False,
+            "error": "Internal server error",
+            "timestamp": datetime.utcnow().isoformat(),
+            "path": str(request.url.path) if hasattr(request, 'url') else "unknown"
+        }
+    )
 
 if __name__ == "__main__":
     import uvicorn

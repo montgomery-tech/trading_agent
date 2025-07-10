@@ -55,7 +55,7 @@ class EnhancedRateLimitingMiddleware(BaseHTTPMiddleware):
         # Check rate limits
         rate_limit_result = await self.rate_limiting_service.check_rate_limit(
             ip=client_ip,
-            path=request.url.path,
+            endpoint_path=request.url.path,  # ← FIXED PARAMETER NAME
             user_data=user_data
         )
 
