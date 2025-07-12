@@ -23,10 +23,48 @@ from api.dependencies import get_database
 from api.database import DatabaseManager
 from api.jwt_service import jwt_service, password_service
 
+import jwt
+import bcrypt
+from fastapi import HTTPException, status
+from pydantic import BaseModel, validator, Field
+
 logger = logging.getLogger(__name__)
 router = APIRouter()
 security = HTTPBearer()
 
+class ForcedPasswordChangeRequest(BaseModel):
+    """Forced password change request (no current password required)"""
+    new_password: str = Field(..., min_length=8, max_length=128, description="New password")
+    confirm_password: str = Field(..., min_length=8, max_length=128, description="Confirm new password")
+    temporary_token: str = Field(..., description="Temporary token from login response")
+
+    @validator('new_password')
+    def validate_password_strength(cls, v):
+        """Validate password meets security requirements"""
+        if len(v) < 8:
+            raise ValueError('Password must be at least 8 characters long')
+        if not any(c.isupper() for c in v):
+            raise ValueError('Password must contain at least one uppercase letter')
+        if not any(c.islower() for c in v):
+            raise ValueError('Password must contain at least one lowercase letter')
+        if not any(c.isdigit() for c in v):
+            raise ValueError('Password must contain at least one number')
+        return v
+
+    @validator('confirm_password')
+    def passwords_match(cls, v, values):
+        if 'new_password' in values and v != values['new_password']:
+            raise ValueError('Passwords do not match')
+        return v
+
+class ForcedPasswordChangeResponse(BaseModel):
+    """Response after successful forced password change"""
+    success: bool = True
+    message: str = "Password changed successfully. You can now log in with your new password."
+    access_token: str
+    refresh_token: str
+    user: dict
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 # =============================================================================
 # Helper Functions
@@ -76,9 +114,9 @@ async def get_user_by_username_or_email(identifier: str, db: DatabaseManager) ->
     """Get user by username or email."""
     query = """
         SELECT id, username, email, password_hash, first_name, last_name,
-               is_active, is_verified, created_at, updated_at, last_login
+               is_active, is_verified, must_change_password, created_at, updated_at, last_login
         FROM users
-        WHERE username = ? OR email = ?
+        WHERE username = %s OR email = %s
     """
     results = db.execute_query(query, (identifier.lower(), identifier.lower()))
     return results[0] if results else None
@@ -88,9 +126,9 @@ async def get_user_by_id(user_id: str, db: DatabaseManager) -> Optional[dict]:
     """Get user by ID."""
     query = """
         SELECT id, username, email, password_hash, first_name, last_name,
-               is_active, is_verified, created_at, updated_at, last_login
+               is_active, is_verified, must_change_password, created_at, updated_at, last_login
         FROM users
-        WHERE id = ?
+        WHERE id = %s
     """
     results = db.execute_query(query, (user_id,))
     return results[0] if results else None
@@ -98,8 +136,8 @@ async def get_user_by_id(user_id: str, db: DatabaseManager) -> Optional[dict]:
 
 async def update_last_login(user_id: str, db: DatabaseManager) -> None:
     """Update user's last login timestamp."""
-    query = "UPDATE users SET last_login = ? WHERE id = ?"
-    db.execute_update(query, (datetime.now(timezone.utc), user_id))
+    query = "UPDATE users SET last_login = %s WHERE id = %s"
+    db.execute_command(query, (datetime.now(timezone.utc), user_id))
 
 
 async def create_user_in_db(user_data: UserRegistrationRequest, db: DatabaseManager) -> str:
@@ -111,10 +149,10 @@ async def create_user_in_db(user_data: UserRegistrationRequest, db: DatabaseMana
         INSERT INTO users (
             id, username, email, password_hash, first_name, last_name,
             is_active, is_verified, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, %s, %s, %s, %s, %s, %s, %s, %s, %s)
     """
 
-    db.execute_update(query, (
+    db.execute_command(query, (
         user_id,
         user_data.username,
         user_data.email,
@@ -129,7 +167,42 @@ async def create_user_in_db(user_data: UserRegistrationRequest, db: DatabaseMana
 
     return user_id
 
+def verify_temporary_token(token: str):
+    """Verify temporary token for forced password change"""
+    try:
+        # Use JWT service to decode token
+        import os
+        SECRET_KEY = os.getenv("SECRET_KEY", "your-secret-key-change-in-production")
+        JWT_ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
 
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[JWT_ALGORITHM])
+
+        # Verify this is a temporary token
+        if not payload.get("temp_token"):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid token type. Temporary token required."
+            )
+
+        # Verify must_change_password flag
+        if not payload.get("must_change_password"):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Token not valid for password change"
+            )
+
+        return payload
+
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Temporary token has expired. Please log in again."
+        )
+    except jwt.InvalidTokenError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid temporary token"
+        )
 # =============================================================================
 # Registration Routes
 # =============================================================================
@@ -212,8 +285,8 @@ async def verify_email(
         )
 
         # Update user verification status
-        query = "UPDATE users SET is_verified = ?, updated_at = ? WHERE id = ?"
-        db.execute_update(query, (True, datetime.now(timezone.utc), token_data.user_id))
+        query = "UPDATE users SET is_verified = %s, updated_at = %s WHERE id = %s"
+        db.execute_command(query, (True, datetime.now(timezone.utc), token_data.user_id))
 
         logger.info(f"Email verified for user: {token_data.username}")
 
@@ -270,6 +343,45 @@ async def login_user(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Account is deactivated"
             )
+
+        # Check if password change is required
+        must_change_password = user.get('must_change_password', False)
+
+        if must_change_password:
+            # Create temporary token for forced password change
+            import os
+            SECRET_KEY = os.getenv("SECRET_KEY", "your-secret-key-change-in-production")
+            JWT_ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
+
+            temp_token_data = {
+                "user_id": user['id'],
+                "username": user['username'],
+                "email": user['email'],
+                "role": user.get('role', 'trader'),
+                "temp_token": True,
+                "must_change_password": True
+            }
+
+            temporary_token = jwt.encode({
+                **temp_token_data,
+                "exp": datetime.now(timezone.utc) + timedelta(hours=1),  # Short expiration
+                "iat": datetime.now(timezone.utc),
+                "jti": str(uuid.uuid4())
+            }, SECRET_KEY, algorithm=JWT_ALGORITHM)
+
+            # Return 403 with temporary token
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={
+                    "error": "password_change_required",
+                    "message": "You must change your password before accessing this resource",
+                    "temporary_token": temporary_token,
+                    "change_password_url": "/api/v1/auth/forced-password-change"
+                }
+            )
+
+        # Update last login timestamp
+        await update_last_login(user['id'], db)
 
         # Update last login timestamp
         await update_last_login(user['id'], db)
@@ -410,8 +522,8 @@ async def change_password(
         new_password_hash = password_service.hash_password(password_data.new_password)
 
         # Update password in database
-        query = "UPDATE users SET password_hash = ?, updated_at = ? WHERE id = ?"
-        db.execute_update(query, (new_password_hash, datetime.now(timezone.utc), current_user.id))
+        query = "UPDATE users SET password_hash = %s, updated_at = %s WHERE id = %s"
+        db.execute_command(query, (new_password_hash, datetime.now(timezone.utc), current_user.id))
 
         logger.info(f"Password changed for user: {current_user.username}")
 
@@ -429,6 +541,78 @@ async def change_password(
             detail="Password change failed"
         )
 
+@router.post("/forced-password-change", response_model=ForcedPasswordChangeResponse)
+async def forced_password_change(
+    password_data: ForcedPasswordChangeRequest,
+    db: DatabaseManager = Depends(get_database)
+):
+    """
+    Change password using temporary token (for forced password changes)
+
+    This endpoint allows users to change their password when they have a temporary token
+    from login that indicated must_change_password=true. No current password required.
+    """
+    try:
+        # Verify temporary token
+        token_payload = verify_temporary_token(password_data.temporary_token)
+        user_id = token_payload["user_id"]
+        username = token_payload["username"]
+        email = token_payload["email"]
+
+        # Hash new password using your existing password service
+        new_password_hash = password_service.hash_password(password_data.new_password)
+
+        # Update password and clear must_change_password flag in database
+        query = """
+            UPDATE users
+            SET password_hash = %s,
+                must_change_password = %s,
+                updated_at = %s
+            WHERE id = %s
+        """
+
+        db.execute_command(query, (
+            new_password_hash,
+            False,  # Clear the must_change_password flag
+            datetime.now(timezone.utc),
+            user_id
+        ))
+
+        # Create new access tokens (user can now login normally)
+        user_role = UserRole(token_payload.get("role", "trader"))
+        tokens = jwt_service.create_token_response(
+            user_id=user_id,
+            username=username,
+            email=email,
+            role=user_role,
+            include_refresh_token=True
+        )
+
+        # Get updated user data for response
+        user_data = {
+            "id": user_id,
+            "username": username,
+            "email": email,
+            "role": token_payload.get("role", "trader"),
+            "must_change_password": False
+        }
+
+        logger.info(f"Forced password change completed for user: {username}")
+
+        return ForcedPasswordChangeResponse(
+            access_token=tokens.access_token,
+            refresh_token=tokens.refresh_token,
+            user=user_data
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Forced password change failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Password change failed due to internal error"
+        )
 
 @router.post("/forgot-password", status_code=status.HTTP_200_OK)
 async def forgot_password(
@@ -494,8 +678,8 @@ async def reset_password(
         new_password_hash = password_service.hash_password(request.new_password)
 
         # Update password in database
-        query = "UPDATE users SET password_hash = ?, updated_at = ? WHERE id = ?"
-        db.execute_update(query, (new_password_hash, datetime.now(timezone.utc), token_data.user_id))
+        query = "UPDATE users SET password_hash = %s, updated_at = %s WHERE id = %s"
+        db.execute_command(query, (new_password_hash, datetime.now(timezone.utc), token_data.user_id))
 
         logger.info(f"Password reset completed for user: {token_data.username}")
 

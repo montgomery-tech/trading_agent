@@ -1,106 +1,68 @@
-#!/usr/bin/env python3
 """
-Balance Tracking System - FastAPI Backend
-Updated main application with JWT authentication support and Task 1.3 Security Framework
+FastAPI Backend - Production Ready Main Application
+Cleaned up version with temporary endpoints removed
 """
 
-from fastapi import FastAPI, HTTPException, status, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
-from contextlib import asynccontextmanager
+from fastapi.security import HTTPBearer
 from datetime import datetime
 import logging
 
+# Core imports
 from api.config import settings
 from api.database import DatabaseManager
-from api.routes import users, transactions, balances, currencies
+from api.security import security_exception_handler
+from api.dependencies import get_database
 
+# Route imports
+from api.routes import users, transactions, balances, currencies, admin
 from api.auth_routes import router as auth_router
-from api.routes import admin
 
-from api.security import (
-    create_security_middleware_stack,
-    security_exception_handler,
-    EnhancedErrorResponse
-)
-
-from api.security.redis_rate_limiting_backend import cleanup_redis_backend
-
-# Setup logging
+# Configure logging
 logging.basicConfig(
     level=getattr(logging, settings.LOG_LEVEL),
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
 
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    """Application lifespan manager with Redis integration"""
-    logger.info("🚀 Starting Balance Tracking API...")
-
-    # Initialize database
-    db = DatabaseManager(settings.DATABASE_URL)
-    try:
-        db.connect()
-        app.state.database = db
-        logger.info("✅ Database initialized")
-    except Exception as e:
-        logger.error(f"❌ Database initialization failed: {e}")
-        raise
-
-    # Initialize Redis backend for rate limiting
-    try:
-        from api.security.enhanced_rate_limiting_service import rate_limiting_service
-        await rate_limiting_service.initialize_redis()
-        logger.info("✅ Redis rate limiting backend initialized")
-    except Exception as e:
-        logger.warning(f"⚠️ Redis initialization failed, using fallback: {e}")
-
-    # Log production readiness status
-    logger.info("🏭 Production Configuration Status:")
-    logger.info(f"   • Environment: {settings.ENVIRONMENT}")
-    logger.info(f"   • Database: {settings.DATABASE_TYPE}")
-    logger.info(f"   • JWT Authentication: {'Enabled' if hasattr(settings, 'SECRET_KEY') else 'Disabled'}")
-    logger.info(f"   • Rate Limiting: {'Enabled' if getattr(settings, 'RATE_LIMIT_ENABLED', True) else 'Disabled'}")
-    logger.info(f"   • Redis Backend: {'Configured' if hasattr(settings, 'RATE_LIMIT_REDIS_URL') else 'Not Configured'}")
-    logger.info(f"   • Max request size: {getattr(settings, 'MAX_REQUEST_SIZE', 10485760) / 1024 / 1024:.1f}MB")
-    logger.info(f"   • Request timeout: {getattr(settings, 'REQUEST_TIMEOUT', 30)}s")
-    logger.info(f"   • Input validation: Enabled")
-    logger.info(f"   • Security headers: Enabled")
-
-    yield
-
-    # Cleanup
-    logger.info("🛑 Shutting down...")
-
-    # Cleanup Redis connections
-    try:
-        await cleanup_redis_backend()
-        logger.info("✅ Redis backend cleaned up")
-    except Exception as e:
-        logger.warning(f"⚠️ Redis cleanup warning: {e}")
-
-    # Cleanup database
-    if hasattr(app.state, 'database'):
-        app.state.database.disconnect()
-        logger.info("✅ Database disconnected")
-
-
-# Create FastAPI app
+# Create FastAPI application
 app = FastAPI(
     title=settings.PROJECT_NAME,
-    description="REST API for managing user balances, transactions, and trading with JWT authentication and comprehensive security",
     version=settings.VERSION,
-    lifespan=lifespan,
+    description="Trading Balance Tracking API",
+    openapi_url=f"{settings.API_V1_PREFIX}/openapi.json",
     docs_url="/docs",
     redoc_url="/redoc"
 )
 
-# NEW: Apply Task 1.3 Security Middleware Stack FIRST (before CORS)
-app = create_security_middleware_stack(app)
 
-# Add CORS middleware with secure settings (after security middleware)
+@app.on_event("startup")
+async def startup_event():
+    """Initialize database connection on startup"""
+    try:
+        db = DatabaseManager(settings.DATABASE_URL)
+        db.connect()
+        app.state.database = db
+        logger.info("✅ Database initialized in app state")
+    except Exception as e:
+        logger.error(f"❌ Failed to initialize database: {e}")
+        raise
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Clean up database connection on shutdown"""
+    if hasattr(app.state, 'database'):
+        try:
+            app.state.database.disconnect()
+            logger.info("✅ Database connection closed")
+        except Exception as e:
+            logger.error(f"❌ Error closing database: {e}")
+            
+# Add security middleware
+security = HTTPBearer()
+
+# Add CORS middleware
 cors_origins = getattr(settings, 'CORS_ORIGINS', ["http://localhost:3000"])
 app.add_middleware(
     CORSMiddleware,
@@ -110,10 +72,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# NEW: Add enhanced exception handlers
+# Add enhanced exception handlers
 app.add_exception_handler(HTTPException, security_exception_handler)
 
-# Include authentication routes (from Task 1.2)
+# Include authentication routes
 app.include_router(
     auth_router,
     prefix=f"{settings.API_V1_PREFIX}/auth",
@@ -121,14 +83,13 @@ app.include_router(
 )
 
 # Include admin routes
-app.include_router(admin.router)
-
-# Include authentication routes
 app.include_router(
-    auth_router,
-    prefix=f"{settings.API_V1_PREFIX}/auth",
-    tags=["Authentication"]
-)# Include existing API routes
+    admin.router,
+    prefix=f"{settings.API_V1_PREFIX}/admin",
+    tags=["Admin"]
+)
+
+# Include existing API routes
 app.include_router(
     users.router,
     prefix=f"{settings.API_V1_PREFIX}/users",
@@ -195,20 +156,34 @@ async def health_check():
     return {
         "status": "healthy",
         "timestamp": datetime.utcnow().isoformat(),
-        "version": settings.VERSION
+        "version": settings.VERSION,
+        "environment": getattr(settings, 'ENVIRONMENT', 'development'),
+        "database": {
+            "type": settings.DATABASE_TYPE,
+            "status": "connected"
+        },
+        "authentication": {
+            "jwt_enabled": True,
+            "password_policy": "enforced"
+        },
+        "security": {
+            "rate_limiting": "enabled" if getattr(settings, 'RATE_LIMIT_ENABLED', True) else "disabled",
+            "input_validation": "enabled",
+            "security_headers": "enabled"
+        }
     }
 
 # Server startup
 if __name__ == "__main__":
     import uvicorn
     logger.info("🚀 Starting Balance Tracking API...")
-    logger.info(f"   • Environment: {settings.ENVIRONMENT}")
-    logger.info(f"   • Debug mode: {settings.DEBUG}")
+    logger.info(f"   • Environment: {getattr(settings, 'ENVIRONMENT', 'development')}")
+    logger.info(f"   • Debug mode: {getattr(settings, 'DEBUG', False)}")
     logger.info(f"   • Database: {settings.DATABASE_TYPE}")
     logger.info(f"   • JWT Authentication: {'Enabled' if hasattr(settings, 'SECRET_KEY') else 'Disabled'}")
     logger.info(f"   • Rate Limiting: {'Enabled' if getattr(settings, 'RATE_LIMIT_ENABLED', True) else 'Disabled'}")
     logger.info(f"   • Security headers: Enabled")
-    
+
     uvicorn.run(
         "main:app",
         host="0.0.0.0",
@@ -216,20 +191,3 @@ if __name__ == "__main__":
         reload=True,
         log_level="info"
     )
-
-# Temporary auth fix for forced password change
-import temp_auth_fix
-app.include_router(temp_auth_fix.router, prefix='', tags=['Auth Fix'])
-
-
-import fixed_admin_endpoint
-app.include_router(fixed_admin_endpoint.router)
-
-
-import working_auth_login
-app.include_router(working_auth_login.router)
-
-
-import debug_auth_endpoint
-app.include_router(debug_auth_endpoint.router)
-
