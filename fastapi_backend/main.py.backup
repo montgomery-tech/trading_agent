@@ -122,13 +122,7 @@ app.include_router(
 
 # Include admin routes
 app.include_router(admin.router)
-
-# Include authentication routes
-app.include_router(
-    auth_router,
-    prefix=f"{settings.API_V1_PREFIX}/auth",
-    tags=["Authentication"]
-)# Include existing API routes
+# Include existing API routes
 app.include_router(
     users.router,
     prefix=f"{settings.API_V1_PREFIX}/users",
@@ -216,20 +210,3 @@ if __name__ == "__main__":
         reload=True,
         log_level="info"
     )
-
-# Temporary auth fix for forced password change
-import temp_auth_fix
-app.include_router(temp_auth_fix.router, prefix='', tags=['Auth Fix'])
-
-
-import fixed_admin_endpoint
-app.include_router(fixed_admin_endpoint.router)
-
-
-import working_auth_login
-app.include_router(working_auth_login.router)
-
-
-import debug_auth_endpoint
-app.include_router(debug_auth_endpoint.router)
-

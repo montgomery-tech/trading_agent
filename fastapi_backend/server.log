@@ -1,0 +1,104 @@
+2025-07-12 12:54:47 - api.config - INFO - config.py:401 - Configuration loaded: Settings({'ENVIRONMENT': <Environment.DEVELOPMENT: 'development'>, 'DEBUG': True, 'DATABASE_TYPE': <DatabaseType.POSTGRESQL: 'postgresql'>, 'PROJECT_NAME': 'Balance Tracking System - Development', 'VERSION': '1.0.0-dev', 'RATE_LIMIT_ENABLED': True, 'EMAIL_ENABLED': False})
+2025-07-12 12:54:47 - passlib.utils.compat - DEBUG - __init__.py:449 - loaded lazy attr 'SafeConfigParser': <class 'configparser.ConfigParser'>
+2025-07-12 12:54:47 - passlib.utils.compat - DEBUG - __init__.py:449 - loaded lazy attr 'NativeStringIO': <class '_io.StringIO'>
+2025-07-12 12:54:47 - passlib.utils.compat - DEBUG - __init__.py:449 - loaded lazy attr 'BytesIO': <class '_io.BytesIO'>
+2025-07-12 12:54:47 - api.jwt_service - INFO - jwt_service.py:44 - JWT Service initialized with HS256 algorithm
+2025-07-12 12:54:47 - passlib.registry - DEBUG - registry.py:296 - registered 'bcrypt' handler: <class 'passlib.handlers.bcrypt.bcrypt'>
+2025-07-12 12:54:47 - api.jwt_service - INFO - jwt_service.py:397 - Password service initialized with bcrypt
+2025-07-12 12:54:47 - api.services.email_service - INFO - email_service.py:17 - 📧 Email service initialized (development mode - console output)
+2025-07-12 12:54:47 - api.security.input_validation - INFO - input_validation.py:77 - Input validation service initialized
+2025-07-12 12:54:47 - api.security.enhanced_rate_limiting_service - INFO - enhanced_rate_limiting_service.py:180 - Enhanced Rate Limiting Service initialized
+2025-07-12 12:54:47 - api.security.enhanced_rate_limiting_middleware - INFO - enhanced_rate_limiting_middleware.py:349 - Enhanced rate limiting middleware stack configured
+2025-07-12 12:54:47 - api.security.middleware - INFO - middleware.py:575 - Security middleware stack configured with enhanced rate limiting
+2025-07-12 12:54:47 - __main__ - INFO - main.py:204 - 🚀 Starting Balance Tracking API...
+2025-07-12 12:54:47 - __main__ - INFO - main.py:205 -    • Environment: Environment.DEVELOPMENT
+2025-07-12 12:54:47 - __main__ - INFO - main.py:206 -    • Debug mode: True
+2025-07-12 12:54:47 - __main__ - INFO - main.py:207 -    • Database: DatabaseType.POSTGRESQL
+2025-07-12 12:54:47 - __main__ - INFO - main.py:208 -    • JWT Authentication: Enabled
+2025-07-12 12:54:47 - __main__ - INFO - main.py:209 -    • Rate Limiting: Enabled
+2025-07-12 12:54:47 - __main__ - INFO - main.py:210 -    • Security headers: Enabled
+INFO:     Will watch for changes in these directories: ['/Users/garrettroth/trading_agent/fastapi_backend']
+INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+INFO:     Started reloader process [29431] using StatReload
+✅ Enhanced rate limiting imports successful
+2025-07-12 12:54:47 - api.config - INFO - config.py:401 - Configuration loaded: Settings({'ENVIRONMENT': <Environment.DEVELOPMENT: 'development'>, 'DEBUG': True, 'DATABASE_TYPE': <DatabaseType.POSTGRESQL: 'postgresql'>, 'PROJECT_NAME': 'Balance Tracking System - Development', 'VERSION': '1.0.0-dev', 'RATE_LIMIT_ENABLED': True, 'EMAIL_ENABLED': False})
+2025-07-12 12:54:47 - passlib.utils.compat - DEBUG - __init__.py:449 - loaded lazy attr 'SafeConfigParser': <class 'configparser.ConfigParser'>
+2025-07-12 12:54:47 - passlib.utils.compat - DEBUG - __init__.py:449 - loaded lazy attr 'NativeStringIO': <class '_io.StringIO'>
+2025-07-12 12:54:47 - passlib.utils.compat - DEBUG - __init__.py:449 - loaded lazy attr 'BytesIO': <class '_io.BytesIO'>
+2025-07-12 12:54:47 - api.jwt_service - INFO - jwt_service.py:44 - JWT Service initialized with HS256 algorithm
+2025-07-12 12:54:47 - passlib.registry - DEBUG - registry.py:296 - registered 'bcrypt' handler: <class 'passlib.handlers.bcrypt.bcrypt'>
+2025-07-12 12:54:47 - api.jwt_service - INFO - jwt_service.py:397 - Password service initialized with bcrypt
+2025-07-12 12:54:47 - api.services.email_service - INFO - email_service.py:17 - 📧 Email service initialized (development mode - console output)
+2025-07-12 12:54:47 - api.security.input_validation - INFO - input_validation.py:77 - Input validation service initialized
+2025-07-12 12:54:47 - api.security.enhanced_rate_limiting_service - INFO - enhanced_rate_limiting_service.py:180 - Enhanced Rate Limiting Service initialized
+2025-07-12 12:54:47 - api.security.enhanced_rate_limiting_middleware - INFO - enhanced_rate_limiting_middleware.py:349 - Enhanced rate limiting middleware stack configured
+2025-07-12 12:54:47 - api.security.middleware - INFO - middleware.py:575 - Security middleware stack configured with enhanced rate limiting
+2025-07-12 12:54:47 - asyncio - DEBUG - selector_events.py:54 - Using selector: KqueueSelector
+2025-07-12 12:54:47 - api.security.enhanced_rate_limiting_middleware - INFO - enhanced_rate_limiting_middleware.py:349 - Enhanced rate limiting middleware stack configured
+2025-07-12 12:54:47 - api.security.middleware - INFO - middleware.py:575 - Security middleware stack configured with enhanced rate limiting
+INFO:     Started server process [29435]
+INFO:     Waiting for application startup.
+2025-07-12 12:54:47 - api.security.enhanced_rate_limiting_middleware - INFO - enhanced_rate_limiting_middleware.py:40 - Enhanced Rate Limiting Middleware initialized
+2025-07-12 12:54:47 - main - INFO - main.py:40 - 🚀 Starting Balance Tracking API...
+2025-07-12 12:54:47 - api.database - INFO - database.py:43 - Database Manager initialized for postgresql
+2025-07-12 12:54:47 - api.database - INFO - database.py:111 - ✅ Connected to PostgreSQL database with connection pool (size: 10)
+2025-07-12 12:54:47 - main - INFO - main.py:47 - ✅ Database initialized
+2025-07-12 12:54:47 - api.security.redis_rate_limiting_backend - INFO - redis_rate_limiting_backend.py:84 - Initialized Redis rate limiting backend: redis://localhost:6379/1
+2025-07-12 12:54:47 - api.security.redis_rate_limiting_backend - INFO - redis_rate_limiting_backend.py:106 - Using async Redis client
+2025-07-12 12:54:47 - api.security.redis_rate_limiting_backend - INFO - redis_rate_limiting_backend.py:123 - ✅ Redis connection initialized successfully
+2025-07-12 12:54:47 - api.security.enhanced_rate_limiting_service - INFO - enhanced_rate_limiting_service.py:194 - ✅ Redis backend initialized for rate limiting
+2025-07-12 12:54:47 - main - INFO - main.py:56 - ✅ Redis rate limiting backend initialized
+2025-07-12 12:54:47 - main - INFO - main.py:61 - 🏭 Production Configuration Status:
+2025-07-12 12:54:47 - main - INFO - main.py:62 -    • Environment: Environment.DEVELOPMENT
+2025-07-12 12:54:47 - main - INFO - main.py:63 -    • Database: DatabaseType.POSTGRESQL
+2025-07-12 12:54:47 - main - INFO - main.py:64 -    • JWT Authentication: Enabled
+2025-07-12 12:54:47 - main - INFO - main.py:65 -    • Rate Limiting: Enabled
+2025-07-12 12:54:47 - main - INFO - main.py:66 -    • Redis Backend: Configured
+2025-07-12 12:54:47 - main - INFO - main.py:67 -    • Max request size: 10.0MB
+2025-07-12 12:54:47 - main - INFO - main.py:68 -    • Request timeout: 30s
+2025-07-12 12:54:47 - main - INFO - main.py:69 -    • Input validation: Enabled
+2025-07-12 12:54:47 - main - INFO - main.py:70 -    • Security headers: Enabled
+INFO:     Application startup complete.
+2025-07-12 12:54:50 - api.security.middleware - INFO - middleware.py:191 - Request: POST http://localhost:8000/api/v1/auth/login
+2025-07-12 12:54:50 - api.security.middleware - DEBUG - middleware.py:192 - Headers: {'host': 'localhost:8000', 'user-agent': 'curl/7.77.0', 'accept': '*/*', 'content-type': 'application/json', 'content-length': '68'}
+2025-07-12 12:54:50 - api.security.middleware - DEBUG - middleware.py:193 - Client: 127.0.0.1
+2025-07-12 12:54:50 - api.auth_routes - ERROR - auth_routes.py:318 - Login failed for testuser_forced@example.com: syntax error at or near "OR"
+LINE 5:         WHERE username = ? OR email = ?
+                                   ^
+
+2025-07-12 12:54:50 - api.security.middleware - INFO - middleware.py:204 - Response: 500 (0.024s)
+✅ Enhanced rate limiting imports successful
+INFO:     127.0.0.1:63806 - "POST /api/v1/auth/login HTTP/1.1" 500 Internal Server Error
+2025-07-12 12:54:50 - api.security.middleware - INFO - middleware.py:191 - Request: POST http://localhost:8000/api/v1/admin/users
+2025-07-12 12:54:50 - api.security.middleware - DEBUG - middleware.py:192 - Headers: {'host': 'localhost:8000', 'user-agent': 'curl/7.77.0', 'accept': '*/*', 'content-type': 'application/json', 'content-length': '71'}
+2025-07-12 12:54:50 - api.security.middleware - DEBUG - middleware.py:193 - Client: 127.0.0.1
+2025-07-12 12:54:50 - api.routes.admin - ERROR - admin.py:172 - User creation failed: current transaction is aborted, commands ignored until end of transaction block
+
+2025-07-12 12:54:50 - api.security.middleware - INFO - middleware.py:204 - Response: 500 (0.011s)
+INFO:     127.0.0.1:63808 - "POST /api/v1/admin/users HTTP/1.1" 500 Internal Server Error
+2025-07-12 12:54:59 - api.security.middleware - INFO - middleware.py:191 - Request: POST http://localhost:8000/api/v1/admin/users
+2025-07-12 12:54:59 - api.security.middleware - DEBUG - middleware.py:192 - Headers: {'host': 'localhost:8000', 'user-agent': 'python-requests/2.28.2', 'accept-encoding': 'gzip, deflate', 'accept': '*/*', 'connection': 'keep-alive', 'content-length': '87', 'content-type': 'application/json'}
+2025-07-12 12:54:59 - api.security.middleware - DEBUG - middleware.py:193 - Client: 127.0.0.1
+2025-07-12 12:54:59 - api.routes.admin - ERROR - admin.py:172 - User creation failed: current transaction is aborted, commands ignored until end of transaction block
+
+2025-07-12 12:54:59 - api.security.middleware - INFO - middleware.py:204 - Response: 500 (0.027s)
+INFO:     127.0.0.1:63811 - "POST /api/v1/admin/users HTTP/1.1" 500 Internal Server Error
+2025-07-12 12:58:53 - api.security.middleware - INFO - middleware.py:191 - Request: POST http://localhost:8000/api/v1/admin/users
+2025-07-12 12:58:53 - api.security.middleware - DEBUG - middleware.py:192 - Headers: {'host': 'localhost:8000', 'user-agent': 'curl/7.77.0', 'accept': '*/*', 'content-type': 'application/json', 'content-length': '84'}
+2025-07-12 12:58:53 - api.security.middleware - DEBUG - middleware.py:193 - Client: 127.0.0.1
+2025-07-12 12:58:53 - api.routes.admin - ERROR - admin.py:172 - User creation failed: server closed the connection unexpectedly
+	This probably means the server terminated abnormally
+	before or while processing the request.
+
+2025-07-12 12:58:53 - api.security.middleware - INFO - middleware.py:204 - Response: 500 (0.027s)
+INFO:     127.0.0.1:63854 - "POST /api/v1/admin/users HTTP/1.1" 500 Internal Server Error
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+2025-07-12 12:59:32 - main - INFO - main.py:75 - 🛑 Shutting down...
+2025-07-12 12:59:32 - api.security.redis_rate_limiting_backend - INFO - redis_rate_limiting_backend.py:143 - Redis connections closed
+2025-07-12 12:59:32 - main - INFO - main.py:80 - ✅ Redis backend cleaned up
+2025-07-12 12:59:32 - api.database - INFO - database.py:151 - PostgreSQL connection pool closed
+2025-07-12 12:59:32 - main - INFO - main.py:87 - ✅ Database disconnected
+INFO:     Application shutdown complete.
+INFO:     Finished server process [29435]
+INFO:     Stopping reloader process [29431]

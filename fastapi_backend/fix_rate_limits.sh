@@ -1,3 +1,21 @@
+#!/bin/bash
+
+# =============================================================================
+# Rate Limiting Fix for Development Testing
+# Fixes the burst protection issue blocking forced password change tests
+# =============================================================================
+
+echo "🔧 Fixing Rate Limiting Configuration for Testing"
+echo "=================================================="
+
+# Step 1: Backup current .env
+echo "📦 Creating backup of current .env..."
+cp .env .env.backup.$(date +%Y%m%d_%H%M%S)
+
+# Step 2: Create temporary development .env with relaxed rate limits
+echo "⚙️  Creating development-friendly rate limits..."
+
+cat > .env << 'EOF'
 # =============================================================================
 # Development Environment Configuration - RELAXED RATE LIMITS FOR TESTING
 # Updated: $(date '+%Y-%m-%d %H:%M:%S')
@@ -87,3 +105,26 @@ METRICS_ENABLED=true
 # Security Configuration
 MAX_REQUEST_SIZE=10485760
 REQUEST_TIMEOUT=30
+EOF
+
+echo "✅ Updated .env with development-friendly rate limits"
+
+# Step 3: Clear Redis cache to reset rate limit counters
+echo "🧹 Clearing Redis rate limit counters..."
+redis-cli -n 1 FLUSHDB > /dev/null 2>&1 || echo "⚠️  Redis not running - will use memory fallback"
+
+echo "✅ Rate limiting fix completed!"
+echo ""
+echo "📋 Changes Made:"
+echo "   • RATE_LIMIT_ADMIN_REQUESTS: 3 → 50"
+echo "   • RATE_LIMIT_BURST_PROTECTION: true → false"
+echo "   • RATE_LIMIT_FALLBACK_TO_MEMORY: false → true"
+echo "   • RATE_LIMIT_ADMIN_BYPASS: false → true"
+echo ""
+echo "🚀 Next Steps:"
+echo "   1. Restart your FastAPI server"
+echo "   2. Run the forced password change tests"
+echo "   3. All tests should now pass without rate limiting errors"
+echo ""
+echo "⚠️  IMPORTANT: These are relaxed settings for development testing only!"
+echo "   Restore production settings before deploying to production."
