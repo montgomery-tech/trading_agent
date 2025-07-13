@@ -12,3 +12,5 @@ RDS_ENDPOINT=trading-api-db.cuxauy4qkf49.us-east-1.rds.amazonaws.com
 ALB_ARN=arn:aws:elasticloadbalancing:us-east-1:132551339697:loadbalancer/app/trading-api-alb/d2bd5454d60ed9f8
 ALB_DNS=trading-api-alb-464076303.us-east-1.elb.amazonaws.com
 TARGET_GROUP_ARN=arn:aws:elasticloadbalancing:us-east-1:132551339697:targetgroup/trading-api-targets/d153a723fa3622fd
+CERTIFICATE_ARN=arn:aws:acm:us-east-1:132551339697:certificate/1144ccfa-ef57-4e54-8630-4beaffac8eaa
+HTTPS_LISTENER_ARN=arn:aws:elasticloadbalancing:us-east-1:132551339697:listener/app/trading-api-alb/d2bd5454d60ed9f8/ff3fcab89501ad47

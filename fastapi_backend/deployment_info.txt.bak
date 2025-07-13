@@ -1,0 +1,16 @@
+VPC_ID=vpc-02393a7923c8770fe
+ALB_SG_ID=sg-0a3d8f4e06c274f97
+EC2_SG_ID=sg-005416e3cb0ff37ea
+RDS_SG_ID=sg-096010db98e309b16
+PUBLIC_SUBNET_ID=subnet-038392fa00173be4c
+PRIVATE_SUBNET_ID=subnet-030611edfdf19eb85
+PRIVATE_SUBNET_2_ID=subnet-051014c0e49a9709c
+DB_PASSWORD=afEyfLrK5S5FFmAlECRY0N7kp
+INSTANCE_ID=i-0152b8b9330ba51f0
+PUBLIC_IP=18.204.204.26
+RDS_ENDPOINT=trading-api-db.cuxauy4qkf49.us-east-1.rds.amazonaws.com
+ALB_ARN=arn:aws:elasticloadbalancing:us-east-1:132551339697:loadbalancer/app/trading-api-alb/d2bd5454d60ed9f8
+ALB_DNS=trading-api-alb-464076303.us-east-1.elb.amazonaws.com
+TARGET_GROUP_ARN=arn:aws:elasticloadbalancing:us-east-1:132551339697:targetgroup/trading-api-targets/d153a723fa3622fd
+CERTIFICATE_ARN=arn:aws:acm:us-east-1:132551339697:certificate/1144ccfa-ef57-4e54-8630-4beaffac8eaa
+HTTPS_LISTENER_ARN=arn:aws:elasticloadbalancing:us-east-1:132551339697:listener/app/trading-api-alb/d2bd5454d60ed9f8/3d3cc6086be6c53d
