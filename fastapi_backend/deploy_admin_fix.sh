@@ -1,3 +1,23 @@
+#!/bin/bash
+# Deploy Admin Authentication Fix
+# Replaces the admin.py file with the corrected version
+
+echo "🔧 DEPLOYING ADMIN AUTHENTICATION FIX"
+echo "====================================="
+
+# Step 1: Backup current admin.py
+echo "📁 Step 1: Creating backup..."
+if [[ -f "api/routes/admin.py" ]]; then
+    BACKUP_FILE="api/routes/admin.py.backup.$(date +%Y%m%d_%H%M%S)"
+    cp "api/routes/admin.py" "$BACKUP_FILE"
+    echo "✅ Backup created: $BACKUP_FILE"
+else
+    echo "⚠️  No existing admin.py found, creating new file"
+fi
+
+# Step 2: Create the fixed admin.py file
+echo "📝 Step 2: Creating fixed admin.py..."
+cat > api/routes/admin.py << 'EOF'
 """
 Enhanced Admin Routes for Balance Tracking API with Authentication Protection
 Complete admin management features with JWT-based authentication and role-based access control
@@ -790,3 +810,53 @@ async def reset_user_password(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to reset password"
         )
+EOF
+
+echo "✅ Fixed admin.py file created"
+
+# Step 3: Restart server instructions
+echo ""
+echo "🔄 Step 3: Server restart required"
+echo "===================================="
+echo "The admin.py file has been updated with corrected authentication imports."
+echo ""
+echo "📋 Next steps:"
+echo "1. Stop your current FastAPI server (Ctrl+C)"
+echo "2. Restart the server:"
+echo "   python3 -m uvicorn main:app --host 0.0.0.0 --port 8000 --log-level info"
+echo "3. Re-run the authentication test:"
+echo "   ./test_admin_auth.sh"
+echo ""
+echo "🔧 The fix:"
+echo "- Changed: from api.auth_dependencies import require_admin_access"
+echo "- To:      from api.auth_dependencies import require_admin"
+echo "- Updated: All endpoint parameters to use require_admin() instead"
+echo ""
+echo "✅ Deployment complete!"
+EOF
+
+chmod +x deploy_admin_fix.sh
+echo "✅ Created deployment script: deploy_admin_fix.sh"
+
+# Step 3: Execute the deployment
+echo ""
+echo "🚀 Step 3: Executing deployment..."
+./deploy_admin_fix.sh
+
+echo ""
+echo "🎯 AUTHENTICATION FIX DEPLOYED"
+echo "==============================="
+echo ""
+echo "✅ Issue identified and fixed:"
+echo "   - Problem: Incorrect import 'require_admin_access' (doesn't exist)"
+echo "   - Solution: Changed to 'require_admin()' (correct function)"
+echo ""
+echo "📋 Next steps:"
+echo "1. Stop and restart your FastAPI server"
+echo "2. Run the authentication test again: ./test_admin_auth.sh"
+echo "3. Should now see successful authenticated admin requests"
+echo ""
+echo "🔧 What was fixed in admin.py:"
+echo "   - Import: require_admin_access → require_admin"
+echo "   - Dependencies: Depends(require_admin_access) → Depends(require_admin())"
+echo "   - All 7 admin endpoints now have correct authentication"

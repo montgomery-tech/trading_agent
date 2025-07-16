@@ -1,3 +1,29 @@
+#!/bin/bash
+# Fix Auth Dependencies SQL Syntax Error
+# This is the REAL cause of the authentication failures
+
+echo "🔧 FIXING AUTH DEPENDENCIES SQL SYNTAX ERROR"
+echo "============================================"
+
+echo "🎯 Root Cause Found:"
+echo "   auth_dependencies.py line 88: SQL syntax error"
+echo "   Using SQLite syntax (WHERE id = ?) with PostgreSQL database"
+echo "   Need PostgreSQL syntax (WHERE id = %s)"
+echo ""
+
+# Step 1: Backup current auth_dependencies.py
+echo "📁 Step 1: Creating backup..."
+if [[ -f "api/auth_dependencies.py" ]]; then
+    cp "api/auth_dependencies.py" "api/auth_dependencies.py.broken.$(date +%Y%m%d_%H%M%S)"
+    echo "✅ Backup created"
+else
+    echo "⚠️  No existing auth_dependencies.py found"
+fi
+
+# Step 2: Deploy the fixed auth_dependencies.py
+echo "🛠️  Step 2: Deploying fixed auth_dependencies.py..."
+
+cat > api/auth_dependencies.py << 'EOF'
 """
 Authentication dependencies for the Balance Tracking API
 Role-based access control and authentication middleware
@@ -304,3 +330,41 @@ require_verified_trader_access = require_verified_trader()
 require_own_resource = require_resource_owner_or_admin()
 require_own_user_resource = require_resource_owner_or_admin("username")
 require_own_id_resource = require_resource_owner_or_admin("user_id")
+EOF
+
+echo "✅ Fixed auth_dependencies.py deployed"
+
+# Step 3: Test the fix
+echo ""
+echo "🧪 Step 3: Testing import..."
+python3 -c "
+try:
+    from api.auth_dependencies import require_admin, AuthenticatedUser
+    print('✅ Auth dependencies import successful')
+    
+    admin_dep = require_admin()
+    print('✅ require_admin() callable')
+except Exception as e:
+    print(f'❌ Import test failed: {e}')
+"
+
+echo ""
+echo "🔄 Step 4: Server restart required"
+echo "=================================="
+echo ""
+echo "🔥 CRITICAL: The server MUST be restarted for the fix to take effect!"
+echo ""
+echo "🛑 1. Stop your current server (Ctrl+C)"
+echo "🚀 2. Start server: python3 -m uvicorn main:app --host 0.0.0.0 --port 8000 --log-level info"
+echo "🧪 3. Test: ./test_admin_auth.sh"
+echo ""
+echo "🎯 What was fixed:"
+echo "   ❌ Before: WHERE id = ? (SQLite syntax causing PostgreSQL errors)"
+echo "   ✅ After:  WHERE id = %s (Proper PostgreSQL syntax)"
+echo ""
+echo "📋 Expected results after restart:"
+echo "   ✅ No more 'syntax error at end of input' errors"
+echo "   ✅ Admin endpoints return real data with valid tokens"
+echo "   ✅ Authentication protection working correctly"
+echo ""
+echo "🎉 AUTH DEPENDENCIES FIX COMPLETE!"

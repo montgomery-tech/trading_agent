@@ -1,7 +1,7 @@
+#!/usr/bin/env python3
 """
 Authentication dependencies for the Balance Tracking API
 Role-based access control and authentication middleware
-FIXED: PostgreSQL SQL syntax corrected
 """
 
 import logging
@@ -40,22 +40,12 @@ async def get_current_user_from_token(
         token_data = jwt_service.validate_token(token, expected_type=TokenType.ACCESS)
 
         # Get user from database to ensure they still exist and are active
-        # FIXED: Use proper PostgreSQL parameter syntax
-        if db.db_type == 'postgresql':
-            query = """
-                SELECT id, username, email, first_name, last_name,
-                       is_active, is_verified, created_at, updated_at, last_login, role
-                FROM users
-                WHERE id = %s
-            """
-        else:
-            query = """
-                SELECT id, username, email, first_name, last_name,
-                       is_active, is_verified, created_at, updated_at, last_login, role
-                FROM users
-                WHERE id = ?
-            """
-        
+        query = """
+            SELECT id, username, email, first_name, last_name,
+                   is_active, is_verified, created_at, updated_at, last_login
+            FROM users
+            WHERE id = ?
+        """
         results = db.execute_query(query, (token_data.user_id,))
 
         if not results:
@@ -201,22 +191,13 @@ async def get_current_user_optional(
         # Validate token
         token_data = jwt_service.validate_token(token, expected_type=TokenType.ACCESS)
 
-        # Get user from database - FIXED: Use proper PostgreSQL syntax
-        if db.db_type == 'postgresql':
-            query = """
-                SELECT id, username, email, first_name, last_name,
-                       is_active, is_verified, created_at, updated_at, last_login, role
-                FROM users
-                WHERE id = %s
-            """
-        else:
-            query = """
-                SELECT id, username, email, first_name, last_name,
-                       is_active, is_verified, created_at, updated_at, last_login, role
-                FROM users
-                WHERE id = ?
-            """
-        
+        # Get user from database
+        query = """
+            SELECT id, username, email, first_name, last_name,
+                   is_active, is_verified, created_at, updated_at, last_login
+            FROM users
+            WHERE id = ?
+        """
         results = db.execute_query(query, (token_data.user_id,))
 
         if not results or not results[0]['is_active']:
@@ -289,6 +270,48 @@ def require_resource_owner_or_admin(resource_user_field: str = "username"):
 
 
 # =============================================================================
+# Rate Limiting Dependencies (Future Enhancement)
+# =============================================================================
+
+async def check_rate_limit(
+    request: Request,
+    current_user: Optional[AuthenticatedUser] = Depends(get_current_user_optional)
+) -> None:
+    """
+    Check rate limits for API endpoints.
+
+    This is a placeholder for future rate limiting implementation.
+    Different limits can be applied based on user role and endpoint type.
+    """
+    # TODO: Implement rate limiting logic
+    # - Anonymous users: stricter limits
+    # - Authenticated users: moderate limits
+    # - Premium/Admin users: higher limits
+    # - Different limits for different endpoint types
+    pass
+
+
+# =============================================================================
+# Security Headers Middleware Dependencies
+# =============================================================================
+
+async def add_security_headers(request: Request) -> None:
+    """
+    Add security headers to responses.
+
+    This would typically be implemented as middleware, but can be used
+    as a dependency for specific routes that need extra security.
+    """
+    # TODO: Implement security headers
+    # - X-Content-Type-Options: nosniff
+    # - X-Frame-Options: DENY
+    # - X-XSS-Protection: 1; mode=block
+    # - Strict-Transport-Security (for HTTPS)
+    # - Content-Security-Policy
+    pass
+
+
+# =============================================================================
 # Convenience Aliases
 # =============================================================================
 
@@ -304,3 +327,85 @@ require_verified_trader_access = require_verified_trader()
 require_own_resource = require_resource_owner_or_admin()
 require_own_user_resource = require_resource_owner_or_admin("username")
 require_own_id_resource = require_resource_owner_or_admin("user_id")
+
+
+# =============================================================================
+# Authentication Decorators (Alternative API)
+# =============================================================================
+
+def authenticated(roles: Optional[List[UserRole]] = None, verified: bool = False):
+    """
+    Decorator for route functions that require authentication.
+
+    Args:
+        roles: Required roles (optional)
+        verified: Require email verification (default: False)
+
+    Usage:
+        @authenticated(roles=[UserRole.ADMIN], verified=True)
+        async def admin_only_route(user: AuthenticatedUser = Depends(get_current_user)):
+            pass
+    """
+    def decorator(func):
+        @wraps(func)
+        async def wrapper(*args, **kwargs):
+            # This is just a documentation decorator
+            # Actual authentication is handled by the dependencies
+            return await func(*args, **kwargs)
+        return wrapper
+    return decorator
+
+
+# =============================================================================
+# Example Usage Documentation
+# =============================================================================
+
+"""
+Example usage of authentication dependencies:
+
+# Basic authentication
+@router.get("/protected")
+async def protected_route(user: AuthenticatedUser = Depends(get_current_user)):
+    return {"message": f"Hello {user.username}"}
+
+# Admin only
+@router.delete("/admin/users/{user_id}")
+async def delete_user(
+    user_id: str,
+    admin: AuthenticatedUser = Depends(require_admin_access)
+):
+    return {"message": "User deleted"}
+
+# Trader or admin
+@router.post("/trades")
+async def create_trade(
+    trade_data: dict,
+    trader: AuthenticatedUser = Depends(require_trader_access)
+):
+    return {"message": "Trade created"}
+
+# Verified users only
+@router.post("/verified-only")
+async def verified_route(
+    user: AuthenticatedUser = Depends(require_verified_access)
+):
+    return {"message": "Verified user access"}
+
+# Resource ownership
+@router.get("/users/{username}/profile")
+async def get_user_profile(
+    username: str,
+    user: AuthenticatedUser = Depends(require_own_user_resource)
+):
+    return {"message": f"Profile for {username}"}
+
+# Optional authentication
+@router.get("/public-or-private")
+async def mixed_route(
+    user: Optional[AuthenticatedUser] = Depends(get_current_user_optional)
+):
+    if user:
+        return {"message": f"Hello {user.username}"}
+    else:
+        return {"message": "Hello anonymous user"}
+"""
