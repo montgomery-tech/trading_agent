@@ -13,10 +13,9 @@ import re
 
 class UserRole(str, Enum):
     """User roles for role-based access control"""
-    USER = "user"
-    TRADER = "trader"
-    ADMIN = "admin"
-    READ_ONLY = "read_only"
+    VIEWER = "viewer"  # View only access
+    TRADER = "trader"  # Can trade, view balances, view transactions, request withdrawals
+    ADMIN = "admin"    # Full access
 
 
 class TokenType(str, Enum):
@@ -38,8 +37,8 @@ class UserRegistrationRequest(BaseModel):
     password: str = Field(..., min_length=8, max_length=128, description="Password (8+ characters)")
     first_name: Optional[str] = Field(None, max_length=100, description="First name")
     last_name: Optional[str] = Field(None, max_length=100, description="Last name")
-    role: Optional[UserRole] = Field(UserRole.USER, description="User role")
-    
+    role: Optional[UserRole] = Field(UserRole.VIEWER, description="User role")
+
     @validator('username')
     def validate_username(cls, v):
         """Validate username format"""
@@ -47,27 +46,27 @@ class UserRegistrationRequest(BaseModel):
         if not re.match(r'^[a-zA-Z0-9_]+$', v):
             raise ValueError('Username can only contain letters, numbers, and underscores')
         return v.lower()
-    
+
     @validator('password')
     def validate_password(cls, v):
         """Validate password strength"""
         if len(v) < 8:
             raise ValueError('Password must be at least 8 characters long')
-        
+
         # Check for at least one uppercase letter
         if not re.search(r'[A-Z]', v):
             raise ValueError('Password must contain at least one uppercase letter')
-        
+
         # Check for at least one lowercase letter
         if not re.search(r'[a-z]', v):
             raise ValueError('Password must contain at least one lowercase letter')
-        
+
         # Check for at least one digit
         if not re.search(r'\d', v):
             raise ValueError('Password must contain at least one number')
-        
+
         return v
-    
+
     @validator('first_name', 'last_name')
     def validate_names(cls, v):
         """Validate name fields"""
@@ -85,7 +84,7 @@ class UserLoginRequest(BaseModel):
     username: str = Field(..., description="Username or email")
     password: str = Field(..., description="Password")
     remember_me: bool = Field(False, description="Extended session duration")
-    
+
     @validator('username')
     def validate_username(cls, v):
         return v.strip().lower()
@@ -96,28 +95,28 @@ class PasswordChangeRequest(BaseModel):
     current_password: str = Field(..., description="Current password")
     new_password: str = Field(..., min_length=8, description="New password")
     confirm_password: str = Field(..., description="Confirm new password")
-    
+
     @validator('confirm_password')
     def passwords_match(cls, v, values, **kwargs):
         if 'new_password' in values and v != values['new_password']:
             raise ValueError('Passwords do not match')
         return v
-    
+
     @validator('new_password')
     def validate_new_password(cls, v):
         """Validate new password strength"""
         if len(v) < 8:
             raise ValueError('Password must be at least 8 characters long')
-        
+
         if not re.search(r'[A-Z]', v):
             raise ValueError('Password must contain at least one uppercase letter')
-        
+
         if not re.search(r'[a-z]', v):
             raise ValueError('Password must contain at least one lowercase letter')
-        
+
         if not re.search(r'\d', v):
             raise ValueError('Password must contain at least one number')
-        
+
         return v
 
 
@@ -131,7 +130,7 @@ class PasswordResetConfirm(BaseModel):
     token: str = Field(..., description="Password reset token")
     new_password: str = Field(..., min_length=8, description="New password")
     confirm_password: str = Field(..., description="Confirm new password")
-    
+
     @validator('confirm_password')
     def passwords_match(cls, v, values, **kwargs):
         if 'new_password' in values and v != values['new_password']:
@@ -190,7 +189,7 @@ class AuthenticatedUser(BaseModel):
     is_verified: bool = Field(..., description="Email verification status")
     created_at: datetime = Field(..., description="Account creation time")
     last_login: Optional[datetime] = Field(None, description="Last login time")
-    
+
     class Config:
         json_encoders = {
             datetime: lambda v: v.isoformat()
@@ -210,7 +209,7 @@ class UserProfile(BaseModel):
     created_at: datetime
     updated_at: datetime
     last_login: Optional[datetime]
-    
+
     class Config:
         json_encoders = {
             datetime: lambda v: v.isoformat()
@@ -224,7 +223,7 @@ class AuthenticationResponse(BaseModel):
     user: AuthenticatedUser = Field(..., description="User information")
     token: Token = Field(..., description="JWT tokens")
     timestamp: datetime = Field(default_factory=datetime.utcnow, description="Response timestamp")
-    
+
     class Config:
         json_encoders = {
             datetime: lambda v: v.isoformat()

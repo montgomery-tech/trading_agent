@@ -1,4 +1,6 @@
+
 #!/usr/bin/env python3
+#auth_routes.py
 """
 Authentication routes for the Balance Tracking API
 User registration, login, logout, and token management
@@ -96,13 +98,20 @@ async def get_current_user(
             detail="Account is deactivated"
         )
 
+    role_mapping = {
+        'admin': UserRole.ADMIN,
+        'trader': UserRole.TRADER,
+        'viewer': UserRole.VIEWER
+    }
+    user_role = role_mapping.get(user.get('role', 'viewer'), UserRole.VIEWER)
+
     return AuthenticatedUser(
         id=user['id'],
         username=user['username'],
         email=user['email'],
         first_name=user['first_name'],
         last_name=user['last_name'],
-        role=UserRole(user.get('role', 'user')),
+        role=user_role,  # Use the mapped role instead
         is_active=user['is_active'],
         is_verified=user['is_verified'],
         created_at=user['created_at'],
@@ -323,6 +332,15 @@ async def login_user(
     try:
         # Get user from database
         user = await get_user_by_username_or_email(login_data.username, db)
+        if user:
+            # Get the role separately
+            role_query = "SELECT role FROM users WHERE id = %s"
+            role_result = db.execute_query(role_query, (user['id'],))
+            user_role_str = role_result[0]['role'] if role_result and role_result[0]['role'] else 'viewer'
+
+            # Add role to user dict
+            user['role'] = user_role_str
+            
         if not user:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
@@ -387,7 +405,9 @@ async def login_user(
         await update_last_login(user['id'], db)
 
         # Create tokens
-        user_role = UserRole(user.get('role', 'user'))
+        # Map role correctly
+        role_mapping = {'admin': UserRole.ADMIN, 'trader': UserRole.TRADER, 'viewer': UserRole.VIEWER}
+        user_role = role_mapping.get(user.get('role', 'viewer'), UserRole.VIEWER)
         tokens = jwt_service.create_token_response(
             user_id=user['id'],
             username=user['username'],
@@ -466,7 +486,9 @@ async def refresh_token(
             )
 
         # Create new tokens
-        user_role = UserRole(user.get('role', 'user'))
+        # Map role correctly
+        role_mapping = {'admin': UserRole.ADMIN, 'trader': UserRole.TRADER, 'viewer': UserRole.VIEWER}
+        user_role = role_mapping.get(user.get('role', 'viewer'), UserRole.VIEWER)
         tokens = jwt_service.create_token_response(
             user_id=user['id'],
             username=user['username'],
@@ -579,7 +601,9 @@ async def forced_password_change(
         ))
 
         # Create new access tokens (user can now login normally)
-        user_role = UserRole(token_payload.get("role", "trader"))
+        # Map role correctly
+        role_mapping = {'admin': UserRole.ADMIN, 'trader': UserRole.TRADER, 'viewer': UserRole.VIEWER}
+        user_role = role_mapping.get(token_payload.get("role", "trader"), UserRole.TRADER)
         tokens = jwt_service.create_token_response(
             user_id=user_id,
             username=username,

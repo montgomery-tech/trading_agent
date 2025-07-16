@@ -3,7 +3,7 @@ FastAPI Backend - Production Ready Main Application
 Cleaned up version with temporary endpoints removed
 """
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer
 from datetime import datetime
@@ -14,8 +14,6 @@ from api.config import settings
 from api.database import DatabaseManager
 from api.security import security_exception_handler
 from api.dependencies import get_database
-
-# Route imports
 from api.routes import users, transactions, balances, currencies, admin
 from api.auth_routes import router as auth_router
 
@@ -58,7 +56,7 @@ async def shutdown_event():
             logger.info("✅ Database connection closed")
         except Exception as e:
             logger.error(f"❌ Error closing database: {e}")
-            
+
 # Add security middleware
 security = HTTPBearer()
 
@@ -170,6 +168,28 @@ async def health_check():
             "rate_limiting": "enabled" if getattr(settings, 'RATE_LIMIT_ENABLED', True) else "disabled",
             "input_validation": "enabled",
             "security_headers": "enabled"
+        }
+    }
+
+@app.get(f"{settings.API_V1_PREFIX}/auth/permissions")
+async def get_user_permissions(
+    #current_user: AuthenticatedUser = Depends(get_current_user)
+):
+    """Get current user's role and permissions"""
+    return {
+        "user_id": current_user.id,
+        "username": current_user.username,
+        "role": current_user.role.value,
+        "permissions": {
+            "can_admin": current_user.role == UserRole.ADMIN,
+            "can_trade": current_user.role in [UserRole.ADMIN, UserRole.TRADER],
+            "can_view": True  # All authenticated users can view
+        },
+        "endpoints_accessible": {
+            "admin": current_user.role == UserRole.ADMIN,
+            "trading": current_user.role in [UserRole.ADMIN, UserRole.TRADER],
+            "balances": True,
+            "transactions": True
         }
     }
 

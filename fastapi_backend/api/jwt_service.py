@@ -48,7 +48,7 @@ class JWTService:
         user_id: str,
         username: str,
         email: str,
-        role: UserRole = UserRole.USER,
+        role: UserRole = UserRole.VIEWER,
         expires_delta: Optional[timedelta] = None
     ) -> str:
         """
@@ -227,7 +227,7 @@ class JWTService:
             user_id = payload.get("sub")
             username = payload.get("username")
             email = payload.get("email")
-            role_str = payload.get("role", UserRole.USER.value)
+            role_str = payload.get("role", UserRole.VIEWER.value)
             token_type_str = payload.get("token_type")
             issued_at_timestamp = payload.get("iat")
             expires_at_timestamp = payload.get("exp")
@@ -264,7 +264,7 @@ class JWTService:
             try:
                 role = UserRole(role_str)
             except ValueError:
-                role = UserRole.USER  # Default role if invalid
+                role = UserRole.VIEWER  # Default role if invalid
 
             # Check if token is expired
             if datetime.now(timezone.utc) > expires_at:
@@ -349,7 +349,7 @@ class JWTService:
         user_id: str,
         username: str,
         email: str,
-        role: UserRole = UserRole.USER,
+        role: UserRole = UserRole.VIEWER,
         include_refresh_token: bool = True
     ) -> Token:
         """
