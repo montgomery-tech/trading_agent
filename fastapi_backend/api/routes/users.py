@@ -6,17 +6,21 @@ from fastapi import APIRouter, HTTPException, Depends
 from api.dependencies import get_database
 from api.database import DatabaseManager
 import logging
+from api.auth_dependencies import require_resource_owner_or_admin, AuthenticatedUser
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-
 @router.get("/{username}")
 async def get_user(
     username: str,
+    current_user: AuthenticatedUser = Depends(require_resource_owner_or_admin("username")),
     db: DatabaseManager = Depends(get_database)
 ):
-    """Get user by username - PostgreSQL compatible"""
+    """
+    Get user by username - SECURITY ENFORCED
+    Users can only access their own profile, admins can access any profile
+    """
     try:
         # Use parameterized query compatible with both SQLite and PostgreSQL
         query = """
@@ -32,38 +36,28 @@ async def get_user(
         else:
             # SQLite uses ? for parameters
             query = query.replace('%s', '?')
-            params = (username, 1)
+            params = (username, True)
 
         results = db.execute_query(query, params)
 
         if not results:
+            logger.warning(f"User not found: {username}")
             raise HTTPException(
                 status_code=404,
-                detail=f"User '{username}' not found or inactive"
+                detail=f"User '{username}' not found"
             )
 
         user = results[0]
 
-        return {
-            "success": True,
-            "data": {
-                "id": user["id"],
-                "username": user["username"],
-                "email": user["email"],
-                "first_name": user["first_name"],
-                "last_name": user["last_name"],
-                "is_active": bool(user["is_active"]),
-                "is_verified": bool(user["is_verified"]),
-                "created_at": user["created_at"],
-                "updated_at": user["updated_at"],
-                "last_login": user["last_login"]
-            }
-        }
+        # Log successful access for security monitoring
+        logger.info(f"User profile access: {current_user.username} accessed {username} (role: {current_user.role.value})")
+
+        return user
 
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error retrieving user: {e}")
+        logger.error(f"Error retrieving user {username}: {e}")
         raise HTTPException(
             status_code=500,
             detail=f"Error retrieving user: {str(e)}"
