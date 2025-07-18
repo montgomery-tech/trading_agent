@@ -14,7 +14,7 @@ from api.config import settings
 from api.database import DatabaseManager
 from api.security import security_exception_handler
 from api.dependencies import get_database
-from api.routes import users, transactions, balances, currencies, admin, spread_management, trades
+from api.routes import users, transactions, balances, currencies, admin, spread_management
 from api.auth_routes import router as auth_router
 
 # Configure logging
@@ -106,9 +106,8 @@ app.include_router(
     tags=["Balances"]
 )
 
-app.include_router(spread_management.router, prefix="/api/v1/trading-pairs", tags=["trading-pairs"])
-
 app.include_router(
+app.include_router(spread_management.router, prefix="/api/v1/trading-pairs", tags=["trading-pairs"])
     currencies.router,
     prefix=f"{settings.API_V1_PREFIX}/currencies",
     tags=["Currencies"]
