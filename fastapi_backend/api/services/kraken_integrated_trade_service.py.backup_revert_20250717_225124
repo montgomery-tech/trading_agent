@@ -1,0 +1,408 @@
+#!/usr/bin/env python3
+"""
+api/services/kraken_integrated_trade_service.py
+Enhanced Trade Service with Kraken API Integration for Market Orders
+"""
+
+import logging
+import uuid
+from datetime import datetime
+from decimal import Decimal, ROUND_HALF_UP
+from typing import Dict, Tuple, Any, Optional
+
+from fastapi import HTTPException, status
+from api.services.enhanced_trade_service import EnhancedTradeService
+from api.services.kraken_client_adapter import get_kraken_client
+from api.models import TradeRequest, TradeResponse, TradingSide, TransactionType
+
+logger = logging.getLogger(__name__)
+
+
+class KrakenIntegratedTradeService(EnhancedTradeService):
+    """
+    Trade service with full Kraken API integration for market orders.
+    
+    This service:
+    1. Gets real-time prices from Kraken
+    2. Places actual market orders on Kraken
+    3. Applies spread markup to execution results
+    4. Updates local database only after successful Kraken execution
+    """
+
+    def __init__(self, db):
+        super().__init__(db)
+        self.kraken_client = None
+        self._use_live_trading = self._get_live_trading_setting()
+        
+    def _get_live_trading_setting(self) -> bool:
+        """Check if live trading is enabled"""
+        import os
+        return os.getenv("ENABLE_LIVE_TRADING", "false").lower() == "true"
+    
+    async def _get_kraken_client(self):
+        """Get Kraken client instance (lazy loading)"""
+        if self.kraken_client is None:
+            self.kraken_client = await get_kraken_client()
+        return self.kraken_client
+    
+    async def get_current_price(self, symbol: str) -> Decimal:
+        """
+        Get current market price from Kraken API
+        
+        Overrides the mock implementation with real Kraken API calls
+        """
+        try:
+            client = await self._get_kraken_client()
+            current_price = await client.get_current_price(symbol)
+            
+            logger.info(f"Retrieved real-time price from Kraken: {symbol} = {current_price}")
+            return current_price
+            
+        except Exception as e:
+            logger.error(f"Failed to get price from Kraken: {e}")
+            # Fallback to parent mock implementation in development
+            if not self._use_live_trading:
+                logger.warning("Using mock price due to Kraken API error")
+                return super().get_current_price(symbol)
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=f"Unable to get current price for {symbol}: {e}"
+            )
+        except Exception as e:
+            logger.error(f"Unexpected error getting price: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Price service error: {e}"
+            )
+    
+    async def execute_kraken_market_order(self, symbol: str, side: str, amount: Decimal) -> Dict[str, Any]:
+        """
+        Execute market order on Kraken and return execution details
+        
+        Args:
+            symbol: Trading pair symbol
+            side: Order side ('buy' or 'sell')
+            amount: Order amount in base currency
+            
+        Returns:
+            Dictionary with execution details including actual fill price
+        """
+        try:
+            client = await self._get_kraken_client()
+            
+            # Place market order on Kraken
+            logger.info(f"Placing market order on Kraken: {side} {amount} {symbol}")
+            order_result = await client.place_market_order(symbol, side, amount)
+            
+            if not order_result.get("success"):
+                raise Exception("Market order placement failed")
+            
+            order_ids = order_result["order_ids"]
+            
+            # Wait briefly for order to execute (market orders execute immediately)
+            import asyncio
+            await asyncio.sleep(0.5)
+            
+            # Get order status to confirm execution
+            order_status = await client.get_order_status(order_ids)
+            
+            # Get trade history for this order to get actual execution price
+            trade_history = await client.get_trade_history(order_ids)
+            
+            # Parse execution details
+            execution_details = self._parse_kraken_execution(order_result, order_status, trade_history)
+            
+            logger.info(f"Kraken market order executed: {execution_details}")
+            return execution_details
+            
+        except Exception as e:
+            logger.error(f"Kraken order execution failed: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=f"Order execution failed: {e}"
+            )
+        except Exception as e:
+            logger.error(f"Unexpected error in order execution: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Order execution error: {e}"
+            )
+    
+    def _parse_kraken_execution(self, order_result: Dict, order_status: Dict, 
+                               trade_history: Dict) -> Dict[str, Any]:
+        """
+        Parse Kraken API responses to extract execution details
+        
+        Returns:
+            Dictionary with execution price, volume, fees, etc.
+        """
+        try:
+            # Get the first order ID
+            order_ids = order_result["order_ids"]
+            primary_order_id = order_ids[0] if order_ids else None
+            
+            if not primary_order_id:
+                raise ValueError("No order ID found in execution result")
+            
+            # Extract order details from status
+            order_info = order_status.get(primary_order_id, {})
+            
+            # Calculate average execution price from trades
+            trades = trade_history.get("trades", {})
+            total_value = Decimal('0')
+            total_volume = Decimal('0')
+            total_fee = Decimal('0')
+            
+            for trade_id, trade_info in trades.items():
+                price = Decimal(str(trade_info.get("price", "0")))
+                volume = Decimal(str(trade_info.get("vol", "0")))
+                fee = Decimal(str(trade_info.get("fee", "0")))
+                
+                total_value += price * volume
+                total_volume += volume
+                total_fee += fee
+            
+            # Calculate average execution price
+            if total_volume > 0:
+                avg_execution_price = total_value / total_volume
+            else:
+                # Fallback to order price if available
+                avg_execution_price = Decimal(str(order_info.get("price", "0")))
+            
+            return {
+                "order_ids": order_ids,
+                "execution_price": avg_execution_price,
+                "executed_volume": total_volume,
+                "total_value": total_value,
+                "kraken_fee": total_fee,
+                "order_status": order_info.get("status", "unknown"),
+                "timestamp": datetime.utcnow(),
+                "raw_order_status": order_status,
+                "raw_trade_history": trade_history
+            }
+            
+        except Exception as e:
+            logger.error(f"Failed to parse Kraken execution details: {e}")
+            # Return basic details if parsing fails
+            return {
+                "order_ids": order_result.get("order_ids", []),
+                "execution_price": Decimal('0'),
+                "executed_volume": Decimal('0'),
+                "total_value": Decimal('0'),
+                "kraken_fee": Decimal('0'),
+                "order_status": "unknown",
+                "timestamp": datetime.utcnow(),
+                "parsing_error": str(e)
+            }
+    
+    async def execute_trade(self, trade_request: TradeRequest) -> TradeResponse:
+        """
+        Execute trade with full Kraken integration and spread application
+        
+        Process:
+        1. Validate user and trading pair
+        2. Execute market order on Kraken
+        3. Apply spread markup to execution price
+        4. Update local database with marked-up trade
+        5. Return marked-up response to client
+        """
+        kraken_execution = None
+        
+        try:
+            # Validate user
+            user = self.validate_and_get_user(trade_request.username)
+            user_id = user['id']
+
+            # Get trading pair with spread information
+            trading_pair = self.get_trading_pair_with_spread(trade_request.symbol)
+            base_currency = trading_pair['base_currency']
+            quote_currency = trading_pair['quote_currency']
+            spread_percentage = trading_pair['spread_percentage']
+
+            # Validate trade constraints
+            self.validate_trade_constraints(trade_request, trading_pair)
+
+            # For market orders only - execute on Kraken first
+            if trade_request.order_type.lower() != "market":
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Only market orders are supported with Kraken integration"
+                )
+            
+            # Execute market order on Kraken
+            if self._use_live_trading:
+                kraken_execution = await self.execute_kraken_market_order(
+                    trade_request.symbol, 
+                    trade_request.side.value, 
+                    trade_request.amount
+                )
+                execution_price = kraken_execution["execution_price"]
+            else:
+                # Development mode - use current price without executing
+                logger.warning("Live trading disabled - using mock execution")
+                execution_price = await self.get_current_price(trade_request.symbol)
+                kraken_execution = {
+                    "order_ids": [f"mock_{uuid.uuid4().hex[:8]}"],
+                    "execution_price": execution_price,
+                    "executed_volume": trade_request.amount,
+                    "total_value": execution_price * trade_request.amount,
+                    "kraken_fee": Decimal('0'),
+                    "order_status": "mock_filled",
+                    "timestamp": datetime.utcnow()
+                }
+            
+            # Apply spread to get client price
+            client_price, spread_amount = self.calculate_spread_adjusted_price(
+                execution_price, spread_percentage, trade_request.side
+            )
+            
+            # Calculate all trade amounts using client price (what customer pays/receives)
+            amounts = self.calculate_trade_amounts_with_spread(
+                trade_request, execution_price, spread_percentage
+            )
+            
+            total_value = amounts['client_total']
+            fee_amount = amounts['fee_amount']
+            net_amount = amounts['net_amount']
+
+            # Execute trade atomically in local database
+            with self.atomic_transaction():
+                if trade_request.side == TradingSide.BUY:
+                    # Buy: debit quote currency, credit base currency
+                    quote_balance_before, quote_balance_after = self.update_balance(
+                        user_id, quote_currency, net_amount, is_debit=True
+                    )
+
+                    base_balance_before, base_balance_after = self.update_balance(
+                        user_id, base_currency, trade_request.amount, is_debit=False
+                    )
+
+                    # Create transaction records
+                    quote_transaction_id = self.create_transaction_record(
+                        user_id, TransactionType.TRADE_BUY, net_amount, quote_currency,
+                        quote_balance_before, quote_balance_after,
+                        f"Buy {trade_request.amount} {base_currency} at {client_price}",
+                        fee_amount, quote_currency
+                    )
+
+                    base_transaction_id = self.create_transaction_record(
+                        user_id, TransactionType.TRADE_BUY, trade_request.amount, base_currency,
+                        base_balance_before, base_balance_after,
+                        f"Receive {trade_request.amount} {base_currency} from buy order",
+                        related_transaction_id=quote_transaction_id
+                    )
+
+                else:  # SELL
+                    # Sell: debit base currency, credit quote currency
+                    base_balance_before, base_balance_after = self.update_balance(
+                        user_id, base_currency, trade_request.amount, is_debit=True
+                    )
+
+                    quote_balance_before, quote_balance_after = self.update_balance(
+                        user_id, quote_currency, net_amount, is_debit=False
+                    )
+
+                    # Create transaction records
+                    base_transaction_id = self.create_transaction_record(
+                        user_id, TransactionType.TRADE_SELL, trade_request.amount, base_currency,
+                        base_balance_before, base_balance_after,
+                        f"Sell {trade_request.amount} {base_currency} at {client_price}"
+                    )
+
+                    quote_transaction_id = self.create_transaction_record(
+                        user_id, TransactionType.TRADE_SELL, net_amount, quote_currency,
+                        quote_balance_before, quote_balance_after,
+                        f"Receive {net_amount} {quote_currency} from sell order",
+                        fee_amount, quote_currency, related_transaction_id=base_transaction_id
+                    )
+
+                # Create enhanced trade record with Kraken execution details
+                trade_id = self.create_kraken_trade_record(
+                    user_id, trading_pair['id'], trade_request.side,
+                    trade_request.amount, execution_price, client_price,
+                    total_value, fee_amount, spread_amount, quote_currency,
+                    base_transaction_id, quote_transaction_id, kraken_execution
+                )
+
+                # Log successful execution
+                logger.info(f"Trade executed successfully: {trade_id}")
+                logger.info(f"Kraken execution price: {execution_price}, Client price: {client_price}")
+
+                # Return response with client-facing data
+                return TradeResponse(
+                    success=True,
+                    message=f"Market order executed: {trade_request.side.value} {trade_request.amount} {trade_request.symbol}",
+                    trade_id=trade_id,
+                    symbol=trade_request.symbol,
+                    side=trade_request.side.value,
+                    amount=trade_request.amount,
+                    price=client_price,  # Client sees marked-up price
+                    total_value=total_value,
+                    fee_amount=fee_amount,
+                    fee_currency=quote_currency,
+                    status='completed',
+                    base_currency_balance_before=base_balance_before,
+                    base_currency_balance_after=base_balance_after,
+                    quote_currency_balance_before=quote_balance_before,
+                    quote_currency_balance_after=quote_balance_after,
+                    base_transaction_id=base_transaction_id,
+                    quote_transaction_id=quote_transaction_id,
+                    executed_at=datetime.utcnow(),
+                    created_at=datetime.utcnow()
+                )
+
+        except Exception as e:
+            logger.error(f"Trade execution failed: {e}")
+            logger.error(f"Kraken execution details: {kraken_execution}")
+            
+            # If we have a Kraken execution but local DB failed, we have a problem
+            if kraken_execution and self._use_live_trading:
+                logger.critical(f"CRITICAL: Kraken order executed but local DB failed. "
+                              f"Order IDs: {kraken_execution.get('order_ids')}. "
+                              f"Manual reconciliation required!")
+            
+            if isinstance(e, HTTPException):
+                raise
+            
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Trade execution failed: {str(e)}"
+            )
+    
+    def create_kraken_trade_record(self, user_id: str, trading_pair_id: str, side: TradingSide,
+                                 amount: Decimal, execution_price: Decimal, client_price: Decimal,
+                                 total_value: Decimal, fee_amount: Decimal, spread_amount: Decimal,
+                                 fee_currency: str, base_transaction_id: str, 
+                                 quote_transaction_id: str, kraken_execution: Dict[str, Any]) -> str:
+        """
+        Create trade record with Kraken execution details
+        
+        Extends the base trade record to include Kraken-specific information
+        """
+        trade_id = str(uuid.uuid4())
+        
+        # Create enhanced trade record
+        query = """
+            INSERT INTO trades (
+                id, user_id, trading_pair_id, side, amount, price, total_value,
+                fee_amount, fee_currency_code, status, executed_at,
+                base_transaction_id, quote_transaction_id, 
+                created_at, updated_at, 
+                execution_price, spread_amount, kraken_order_ids, kraken_execution_data
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """
+
+        now = datetime.utcnow()
+        kraken_order_ids = ",".join(kraken_execution.get("order_ids", []))
+        kraken_data = str(kraken_execution)  # Store as string for now
+        
+        params = (
+            trade_id, user_id, trading_pair_id, side.value, float(amount),
+            float(client_price), float(total_value), float(fee_amount), fee_currency,
+            'completed', now, base_transaction_id, quote_transaction_id,
+            now, now, float(execution_price), float(spread_amount), 
+            kraken_order_ids, kraken_data
+        )
+
+        self.db.execute_query(query, params)
+        return trade_id

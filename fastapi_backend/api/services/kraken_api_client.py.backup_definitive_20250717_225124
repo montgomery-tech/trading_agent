@@ -1,0 +1,425 @@
+#!/usr/bin/env python3
+"""
+api/services/kraken_api_client.py
+Kraken API client service with SSL certificate handling for macOS
+"""
+
+import os
+import asyncio
+import logging
+from typing import Dict, Any, Optional, Union
+from decimal import Decimal
+from datetime import datetime
+import hashlib
+import hmac
+import base64
+import time
+import urllib.parse
+import aiohttp
+import ssl
+import json
+
+# Try to import certifi for SSL certificates
+try:
+    import certifi
+    HAS_CERTIFI = True
+except ImportError:
+    HAS_CERTIFI = False
+
+from api.config import settings
+
+logger = logging.getLogger(__name__)
+
+
+class KrakenAPIError(Exception):
+    """Custom exception for Kraken API errors"""
+    pass
+
+
+class KrakenAPIClient:
+    """
+    Kraken API client for market order execution with SSL handling
+
+    Handles authentication, order placement, and response processing
+    for integration with FastAPI backend trade services.
+    """
+
+    def __init__(self):
+        self.base_url = "https://api.kraken.com"
+        self.api_version = "0"
+
+        # Get credentials from environment
+        self.api_key = os.getenv("KRAKEN_API_KEY")
+        self.api_secret = os.getenv("KRAKEN_API_SECRET")
+
+        if not self.api_key or not self.api_secret:
+            logger.warning("Kraken API credentials not found in environment variables")
+            logger.warning("Set KRAKEN_API_KEY and KRAKEN_API_SECRET for live trading")
+
+        # Request timeout and retry settings
+        self.timeout = 30
+        self.max_retries = 3
+        self.retry_delay = 1.0
+
+        # SSL configuration
+        self.ssl_context = self._create_ssl_context()
+
+        # Trading pair mapping (your system symbol -> Kraken pair)
+        self.symbol_mapping = {
+            # Standard format (BTC/USD)
+            "BTC/USD": "XBTUSD",
+            "ETH/USD": "ETHUSD", 
+            "ETH/BTC": "ETHXBT",
+            "LTC/USD": "LTCUSD",
+            "ADA/USD": "ADAUSD",
+            "SOL/USD": "SOLUSD",
+            
+            # URL-safe format (BTC-USD)
+            "BTC-USD": "XBTUSD",
+            "ETH-USD": "ETHUSD",
+            "ETH-BTC": "ETHXBT", 
+            "LTC-USD": "LTCUSD",
+            "ADA-USD": "ADAUSD",
+            "SOL-USD": "SOLUSD",
+            
+            # Compact format (BTCUSD)
+            "BTCUSD": "XBTUSD",
+            "ETHUSD": "ETHUSD",
+            "ETHBTC": "ETHXBT",
+            "LTCUSD": "LTCUSD", 
+            "ADAUSD": "ADAUSD",
+            "SOLUSD": "SOLUSD"
+        }
+
+    def _create_ssl_context(self):
+        """Create SSL context with proper certificate handling"""
+        try:
+            if HAS_CERTIFI:
+                # Use certifi certificates if available
+                ssl_context = ssl.create_default_context(cafile=certifi.where())
+                logger.info("Using certifi SSL certificates")
+                return ssl_context
+            else:
+                # Fallback to default context
+                ssl_context = ssl.create_default_context()
+                logger.info("Using default SSL context")
+                return ssl_context
+        except Exception as e:
+            logger.warning(f"SSL context creation failed: {e}")
+            logger.warning("Using relaxed SSL verification")
+            # Create relaxed SSL context for development
+            ssl_context = ssl.create_default_context()
+            ssl_context.check_hostname = False
+            ssl_context.verify_mode = ssl.CERT_NONE
+            return ssl_context
+
+    def _generate_signature(self, url_path: str, data: Dict[str, Any], nonce: str) -> str:
+        """Generate authentication signature for Kraken API"""
+        if not self.api_secret:
+            raise KrakenAPIError("API secret not configured")
+
+        postdata = urllib.parse.urlencode(data)
+        encoded = (nonce + postdata).encode()
+        message = url_path.encode() + hashlib.sha256(encoded).digest()
+
+        signature = hmac.new(
+            base64.b64decode(self.api_secret),
+            message,
+            hashlib.sha512
+        )
+
+        return base64.b64encode(signature.digest()).decode()
+
+    def _map_symbol_to_kraken(self, symbol: str) -> str:
+        """Map internal trading pair symbol to Kraken pair format"""
+        if symbol in self.symbol_mapping:
+            return self.symbol_mapping[symbol]
+
+        # Try to auto-convert common formats
+        if "/" in symbol:
+            base, quote = symbol.split("/")
+            # Common conversions
+            if base == "BTC":
+                base = "XBT"
+            if quote == "BTC":
+                quote = "XBT"
+            return f"{base}{quote}"
+
+        raise KrakenAPIError(f"Unknown symbol mapping for: {symbol}")
+
+    async def _make_public_request(self, endpoint: str, params: Optional[Dict] = None) -> Dict[str, Any]:
+        """Make public API request to Kraken with SSL handling"""
+        url = f"{self.base_url}/{self.api_version}/public/{endpoint}"
+
+        connector = aiohttp.TCPConnector(ssl=self.ssl_context)
+
+        async with aiohttp.ClientSession(
+            connector=connector,
+            timeout=aiohttp.ClientTimeout(total=self.timeout)
+        ) as session:
+            try:
+                async with session.get(url, params=params) as response:
+                    data = await response.json()
+
+                    if response.status != 200:
+                        raise KrakenAPIError(f"HTTP {response.status}: {data}")
+
+                    if data.get("error"):
+                        raise KrakenAPIError(f"Kraken API error: {data['error']}")
+
+                    return data
+
+            except aiohttp.ClientError as e:
+                raise KrakenAPIError(f"Request failed: {e}")
+
+    async def _make_private_request(self, endpoint: str, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Make authenticated private API request to Kraken with SSL handling"""
+        if not self.api_key or not self.api_secret:
+            raise KrakenAPIError("API credentials not configured for private requests")
+
+        url = f"{self.base_url}/{self.api_version}/private/{endpoint}"
+        url_path = f"/{self.api_version}/private/{endpoint}"
+
+        # Add nonce
+        nonce = str(int(time.time() * 1000))
+        data["nonce"] = nonce
+
+        # Generate signature
+        signature = self._generate_signature(url_path, data, nonce)
+
+        headers = {
+            "API-Key": self.api_key,
+            "API-Sign": signature,
+            "Content-Type": "application/x-www-form-urlencoded"
+        }
+
+        connector = aiohttp.TCPConnector(ssl=self.ssl_context)
+
+        async with aiohttp.ClientSession(
+            connector=connector,
+            timeout=aiohttp.ClientTimeout(total=self.timeout)
+        ) as session:
+            try:
+                async with session.post(url, data=data, headers=headers) as response:
+                    result = await response.json()
+
+                    if response.status != 200:
+                        raise KrakenAPIError(f"HTTP {response.status}: {result}")
+
+                    if result.get("error"):
+                        raise KrakenAPIError(f"Kraken API error: {result['error']}")
+
+                    return result
+
+            except aiohttp.ClientError as e:
+                raise KrakenAPIError(f"Request failed: {e}")
+
+    async def get_ticker_info(self, symbol: str) -> Dict[str, Any]:
+        """Get ticker information for a trading pair"""
+        try:
+            kraken_pair = self._map_symbol_to_kraken(symbol)
+            response = await self._make_public_request("Ticker", {"pair": kraken_pair})
+
+            if "result" not in response:
+                raise KrakenAPIError("No ticker data received")
+
+            # Kraken returns different key formats, try to find the right one
+            result = response["result"]
+            ticker_data = None
+
+            # Try exact match first
+            if kraken_pair in result:
+                ticker_data = result[kraken_pair]
+            else:
+                # Try to find by partial match (Kraken sometimes adds extra characters)
+                for key in result.keys():
+                    if kraken_pair in key or key in kraken_pair:
+                        ticker_data = result[key]
+                        break
+
+            if not ticker_data:
+                # Use the first available key since Kraken returns XXBTZUSD instead of XBTUSD
+                available_pairs = list(result.keys())
+                if available_pairs:
+                    first_key = available_pairs[0]
+                    ticker_data = result[first_key]
+                    logger.info(f"Using available key '{first_key}' for requested pair '{kraken_pair}'")
+                else:
+                    raise KrakenAPIError(f"No ticker data available. Result: {result}")
+
+            # Parse ticker data
+            return {
+                "symbol": symbol,
+                "kraken_pair": kraken_pair,
+                "bid": float(ticker_data["b"][0]),  # Best bid price
+                "ask": float(ticker_data["a"][0]),  # Best ask price
+                "last": float(ticker_data["c"][0]),  # Last trade price
+                "volume": float(ticker_data["v"][1]),  # 24h volume
+                "vwap": float(ticker_data["p"][1]),  # 24h VWAP
+                "trades": int(ticker_data["t"][1]),  # Number of trades today
+                "low": float(ticker_data["l"][1]),  # 24h low
+                "high": float(ticker_data["h"][1]),  # 24h high
+                "timestamp": datetime.utcnow()
+            }
+
+        except Exception as e:
+            logger.error(f"Failed to get ticker for {symbol}: {e}")
+            raise KrakenAPIError(f"Failed to get ticker: {e}")
+
+    async def get_current_price(self, symbol: str) -> Decimal:
+        """Get current market price for immediate market order execution"""
+        try:
+            ticker = await self.get_ticker_info(symbol)
+
+            # For market orders, use the mid-price between bid and ask
+            bid = Decimal(str(ticker["bid"]))
+            ask = Decimal(str(ticker["ask"]))
+            mid_price = (bid + ask) / 2
+
+            logger.info(f"Current price for {symbol}: bid={bid}, ask={ask}, mid={mid_price}")
+            return mid_price
+
+        except Exception as e:
+            logger.error(f"Failed to get current price for {symbol}: {e}")
+            raise KrakenAPIError(f"Failed to get current price: {e}")
+
+    async def place_market_order(self, symbol: str, side: str, volume: Union[str, Decimal]) -> Dict[str, Any]:
+        """
+        Place a market order on Kraken
+
+        Args:
+            symbol: Trading pair symbol (e.g., "BTC/USD")
+            side: Order side ("buy" or "sell")
+            volume: Order volume in base currency
+
+        Returns:
+            Dictionary containing order execution details
+        """
+        try:
+            kraken_pair = self._map_symbol_to_kraken(symbol)
+
+            # Prepare order data
+            order_data = {
+                "pair": kraken_pair,
+                "type": side.lower(),
+                "ordertype": "market",
+                "volume": str(volume)
+            }
+
+            logger.info(f"Placing market order: {side} {volume} {symbol} ({kraken_pair})")
+
+            # Place order
+            response = await self._make_private_request("AddOrder", order_data)
+
+            if "result" not in response:
+                raise KrakenAPIError("No result in order response")
+
+            result = response["result"]
+            order_ids = result.get("txid", [])
+
+            if not order_ids:
+                raise KrakenAPIError("No order IDs returned")
+
+            logger.info(f"Market order placed successfully: {order_ids}")
+
+            # Get order description
+            description = result.get("descr", {})
+
+            return {
+                "success": True,
+                "order_ids": order_ids,
+                "kraken_pair": kraken_pair,
+                "side": side,
+                "volume": str(volume),
+                "order_type": "market",
+                "description": description.get("order", ""),
+                "timestamp": datetime.utcnow(),
+                "raw_response": result
+            }
+
+        except Exception as e:
+            logger.error(f"Failed to place market order: {e}")
+            raise KrakenAPIError(f"Failed to place market order: {e}")
+
+    async def get_order_status(self, order_ids: list) -> Dict[str, Any]:
+        """Get status of specific orders"""
+        try:
+            if not order_ids:
+                raise KrakenAPIError("No order IDs provided")
+
+            # Convert list to comma-separated string
+            txid = ",".join(order_ids)
+
+            response = await self._make_private_request("QueryOrders", {"txid": txid})
+
+            if "result" not in response:
+                raise KrakenAPIError("No result in order status response")
+
+            return response["result"]
+
+        except Exception as e:
+            logger.error(f"Failed to get order status: {e}")
+            raise KrakenAPIError(f"Failed to get order status: {e}")
+
+    async def get_trade_history(self, order_ids: Optional[list] = None) -> Dict[str, Any]:
+        """Get trade history, optionally filtered by order IDs"""
+        try:
+            data = {}
+            if order_ids:
+                data["txid"] = ",".join(order_ids)
+
+            response = await self._make_private_request("TradesHistory", data)
+
+            if "result" not in response:
+                raise KrakenAPIError("No result in trade history response")
+
+            return response["result"]
+
+        except Exception as e:
+            logger.error(f"Failed to get trade history: {e}")
+            raise KrakenAPIError(f"Failed to get trade history: {e}")
+
+    async def get_account_balance(self) -> Dict[str, Decimal]:
+        """Get account balance for all currencies"""
+        try:
+            response = await self._make_private_request("Balance", {})
+
+            if "result" not in response:
+                raise KrakenAPIError("No result in balance response")
+
+            # Convert to Decimal for precision
+            balances = {}
+            for currency, amount in response["result"].items():
+                balances[currency] = Decimal(str(amount))
+
+            return balances
+
+        except Exception as e:
+            logger.error(f"Failed to get account balance: {e}")
+            raise KrakenAPIError(f"Failed to get account balance: {e}")
+
+    async def validate_connection(self) -> bool:
+        """Validate API connection and credentials"""
+        try:
+            # Test public endpoint
+            await self._make_public_request("Time")
+
+            # Test private endpoint if credentials available
+            if self.api_key and self.api_secret:
+                await self._make_private_request("Balance", {})
+
+            logger.info("Kraken API connection validated successfully")
+            return True
+
+        except Exception as e:
+            logger.error(f"Kraken API connection validation failed: {e}")
+            return False
+
+
+# Singleton instance for the application
+kraken_client = KrakenAPIClient()
+
+
+async def get_kraken_client() -> KrakenAPIClient:
+    """Dependency function to get Kraken API client instance"""
+    return kraken_client

@@ -1,5 +1,38 @@
 #!/usr/bin/env python3
 """
+fix_trades_routes_issues.py
+Fix the missing and broken endpoints in trades routes
+"""
+
+def check_current_trades_file():
+    """Check what's currently in the trades file"""
+    
+    print("🔍 Checking current trades.py file...")
+    
+    with open("api/routes/trades.py", "r") as f:
+        content = f.read()
+    
+    # Check for each endpoint
+    endpoints = {
+        "kraken/status": "@router.get(\"/kraken/status\")" in content,
+        "pricing/{symbol}": "pricing/{symbol}" in content,
+        "user/{username}": "user/{username}" in content,
+        "execute": "@router.post(\"/execute\")" in content,
+        "simulate": "@router.post(\"/simulate\")" in content,
+    }
+    
+    print("📋 Current endpoints in trades.py:")
+    for endpoint, exists in endpoints.items():
+        status = "✅" if exists else "❌"
+        print(f"  {status} {endpoint}")
+    
+    return endpoints
+
+def create_minimal_working_trades_file():
+    """Create a minimal working trades file that fixes the issues"""
+    
+    minimal_trades = '''#!/usr/bin/env python3
+"""
 api/routes/trades.py
 Trade execution and management routes with Kraken API integration
 """
@@ -318,3 +351,58 @@ async def get_user_trades(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to retrieve trades: {str(e)}"
         )
+'''
+    
+    # Backup current file
+    import shutil
+    from datetime import datetime
+    
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    backup_path = f"api/routes/trades.py.backup_fixed_{timestamp}"
+    shutil.copy2("api/routes/trades.py", backup_path)
+    print(f"✅ Backed up current trades.py to {backup_path}")
+    
+    # Write the fixed version
+    with open("api/routes/trades.py", "w") as f:
+        f.write(minimal_trades)
+    
+    print("✅ Created fixed api/routes/trades.py")
+    return True
+
+def main():
+    print("🔧 FIXING TRADES ROUTES ISSUES")
+    print("=" * 50)
+    
+    # Check current state
+    endpoints = check_current_trades_file()
+    
+    # Create fixed version
+    print("\n🔧 Creating fixed trades routes...")
+    success = create_minimal_working_trades_file()
+    
+    if success:
+        print("\n✅ FIXED TRADES ROUTES!")
+        print("=" * 30)
+        print()
+        print("📋 What was fixed:")
+        print("  ✅ Added missing /pricing/{symbol} endpoint")
+        print("  ✅ Fixed SQL syntax errors in user trades")
+        print("  ✅ Simplified database queries")
+        print("  ✅ Added proper error handling")
+        print()
+        print("📋 Next steps:")
+        print("1. Restart your FastAPI app:")
+        print("   # Stop with Ctrl+C, then:")
+        print("   python3 main.py")
+        print()
+        print("2. Test the fixed endpoints:")
+        print("   curl http://localhost:8000/api/v1/trades/pricing/BTC/USD")
+        print("   curl -X POST http://localhost:8000/api/v1/trades/simulate \\")
+        print("     -H 'Content-Type: application/json' \\")
+        print("     -d '{\"symbol\":\"BTC/USD\",\"side\":\"buy\",\"amount\":\"0.001\"}'")
+        print()
+        print("3. Check that all endpoints work:")
+        print("   python3 test_routes_manually.py")
+
+if __name__ == "__main__":
+    main()

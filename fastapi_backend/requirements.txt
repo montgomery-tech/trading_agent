@@ -72,3 +72,7 @@ structlog==24.5.0
 # - For local development: docker run -p 6379:6379 redis:7-alpine
 # - For production: Use managed Redis service (AWS ElastiCache, etc.)
 # =============================================================================
+
+# Kraken API integration
+aiohttp>=3.8.0
+asyncio-throttle>=1.0.0
