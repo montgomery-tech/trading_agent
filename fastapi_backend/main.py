@@ -1,3 +1,26 @@
+#!/usr/bin/env python3
+# Load environment variables before anything else
+from dotenv import load_dotenv
+load_dotenv()
+
+# KRAKEN ENVIRONMENT VERIFICATION - Add this section after load_dotenv()
+import os
+print("🔧 Kraken Environment Check:")
+api_key = os.getenv('KRAKEN_API_KEY')
+api_secret = os.getenv('KRAKEN_API_SECRET')
+live_trading = os.getenv('ENABLE_LIVE_TRADING')
+
+print(f"   KRAKEN_API_KEY: {'✅ SET' if api_key else '❌ NOT SET'}")
+print(f"   KRAKEN_API_SECRET: {'✅ SET' if api_secret else '❌ NOT SET'}")
+print(f"   ENABLE_LIVE_TRADING: {live_trading}")
+
+if api_key and api_secret:
+    print(f"🎉 Kraken credentials loaded successfully!")
+    print(f"   API Key length: {len(api_key)}")
+    print(f"   Live trading enabled: {live_trading == 'true'}")
+else:
+    print(f"⚠️  Warning: Kraken credentials not found in environment")
+
 """
 FastAPI Backend - Production Ready Main Application
 Cleaned up version with temporary endpoints removed
@@ -43,6 +66,15 @@ async def startup_event():
         db.connect()
         app.state.database = db
         logger.info("✅ Database initialized in app state")
+
+        # KRAKEN STARTUP VERIFICATION
+        api_key = os.getenv('KRAKEN_API_KEY')
+        live_trading = os.getenv('ENABLE_LIVE_TRADING')
+        if api_key:
+            logger.info(f"✅ Kraken API configured - Live trading: {live_trading}")
+        else:
+            logger.warning("⚠️  Kraken API credentials not found")
+
     except Exception as e:
         logger.error(f"❌ Failed to initialize database: {e}")
         raise
@@ -161,6 +193,12 @@ async def root():
             "logout": f"{settings.API_V1_PREFIX}/auth/logout",
             "profile": f"{settings.API_V1_PREFIX}/auth/me",
             "change_password": f"{settings.API_V1_PREFIX}/auth/change-password"
+        },
+        # KRAKEN TRADING STATUS
+        "kraken_status": {
+            "api_configured": bool(os.getenv('KRAKEN_API_KEY')),
+            "live_trading": os.getenv('ENABLE_LIVE_TRADING', 'false'),
+            "trading_endpoint": "/api/v1/trades/execute-simple"
         }
     }
 
@@ -184,6 +222,12 @@ async def health_check():
             "rate_limiting": "enabled" if getattr(settings, 'RATE_LIMIT_ENABLED', True) else "disabled",
             "input_validation": "enabled",
             "security_headers": "enabled"
+        },
+        # KRAKEN INTEGRATION STATUS
+        "kraken": {
+            "api_configured": bool(os.getenv('KRAKEN_API_KEY')),
+            "live_trading_enabled": os.getenv('ENABLE_LIVE_TRADING', 'false'),
+            "environment": os.getenv('ENVIRONMENT', 'development')
         }
     }
 
@@ -219,6 +263,12 @@ if __name__ == "__main__":
     logger.info(f"   • JWT Authentication: {'Enabled' if hasattr(settings, 'SECRET_KEY') else 'Disabled'}")
     logger.info(f"   • Rate Limiting: {'Enabled' if getattr(settings, 'RATE_LIMIT_ENABLED', True) else 'Disabled'}")
     logger.info(f"   • Security headers: Enabled")
+
+    # KRAKEN STARTUP INFO
+    api_key = os.getenv('KRAKEN_API_KEY')
+    live_trading = os.getenv('ENABLE_LIVE_TRADING')
+    logger.info(f"   • Kraken API: {'Configured' if api_key else 'Not configured'}")
+    logger.info(f"   • Live Trading: {live_trading}")
 
     uvicorn.run(
         "main:app",

@@ -1,8 +1,3 @@
-#!/usr/bin/env python3
-# Load environment variables before anything else
-from dotenv import load_dotenv
-load_dotenv()
-
 """
 FastAPI Backend - Production Ready Main Application
 Cleaned up version with temporary endpoints removed
