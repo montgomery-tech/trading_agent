@@ -176,7 +176,7 @@ async def root():
         "version": settings.VERSION,
         "status": "healthy",
         "timestamp": datetime.utcnow().isoformat(),
-        "authentication": "JWT Bearer Token",
+        "authentication": "API Key Authentication",
         "security": {
             "input_validation": "enabled",
             "rate_limiting": "enabled" if getattr(settings, 'RATE_LIMIT_ENABLED', True) else "disabled",
@@ -222,8 +222,8 @@ async def health_check():
             "status": "connected"
         },
         "authentication": {
-            "jwt_enabled": True,
-            "password_policy": "enforced"
+            "api_key_enabled": True,
+            "admin_managed": True
         },
         "security": {
             "rate_limiting": "enabled" if getattr(settings, 'RATE_LIMIT_ENABLED', True) else "disabled",
@@ -238,10 +238,10 @@ async def health_check():
         }
     }
 
-@app.get(f"{settings.API_V1_PREFIX}/auth/permissions")
-async def get_user_permissions(
+#@app.get(f"{settings.API_V1_PREFIX}/auth/permissions")
+#async def get_user_permissions(
     #current_user: AuthenticatedUser = Depends(get_current_user)
-):
+#):
     """Get current user's role and permissions"""
     return {
         "user_id": current_user.id,
