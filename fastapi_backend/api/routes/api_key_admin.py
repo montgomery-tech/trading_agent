@@ -39,14 +39,14 @@ class AdminCreateAPIKeyRequest(BaseModel):
     description: Optional[str] = Field(None, max_length=500, description="Key description")
     permissions_scope: APIKeyScope = Field(APIKeyScope.INHERIT, description="Permission scope")
     expires_at: Optional[datetime] = Field(None, description="Optional expiration date")
-    
+
     @validator('name')
     def validate_name(cls, v):
         v = v.strip()
         if not v:
             raise ValueError('API key name cannot be empty')
         return v
-    
+
     @validator('expires_at')
     def validate_expiration(cls, v):
         if v and v <= datetime.now(timezone.utc):
@@ -69,7 +69,7 @@ class APIKeyStatsResponse(BaseModel):
     success: bool = True
     message: str = "API key statistics retrieved"
     stats: APIKeyUsageStats
-    
+
     class Config:
         json_encoders = {
             datetime: lambda v: v.isoformat()
@@ -84,7 +84,7 @@ class AdminAPIKeyListResponse(BaseModel):
     pagination: Dict[str, Any]
     total_count: int
     summary: Dict[str, Any]
-    
+
     class Config:
         json_encoders = {
             datetime: lambda v: v.isoformat()
@@ -98,7 +98,7 @@ class APIKeyActionResponse(BaseModel):
     action: str
     api_key_id: str
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    
+
     class Config:
         json_encoders = {
             datetime: lambda v: v.isoformat()
@@ -118,7 +118,7 @@ async def create_api_key(
 ):
     """
     Create a new API key for a user (Admin only).
-    
+
     Creates an API key with the specified permissions and returns
     the full key (shown only once) along with key information.
     """
@@ -127,16 +127,16 @@ async def create_api_key(
         user_query = "SELECT id, username, email, role FROM users WHERE id = %s AND is_active = %s"
         if db.db_type != 'postgresql':
             user_query = user_query.replace('%s', '?')
-        
+
         user_result = db.execute_query(user_query, (request.user_id, True))
         if not user_result:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="User not found or inactive"
             )
-        
+
         user = user_result[0]
-        
+
         # Create API key using service
         create_request = CreateAPIKeyRequest(
             user_id=request.user_id,
@@ -145,17 +145,17 @@ async def create_api_key(
             permissions_scope=request.permissions_scope,
             expires_at=request.expires_at
         )
-        
+
         api_key_obj, full_api_key = await api_key_service.create_api_key(
             create_request, admin.id, db
         )
-        
+
         # Log admin action
         logger.info(
             f"Admin {admin.username} created API key '{request.name}' "
             f"for user {user['username']} ({request.user_id})"
         )
-        
+
         # Prepare response
         key_info = {
             "id": api_key_obj.id,
@@ -170,13 +170,13 @@ async def create_api_key(
             "expires_at": api_key_obj.expires_at,
             "created_by": admin.username
         }
-        
+
         return CreateAPIKeyResponse(
             message=f"API key '{request.name}' created successfully for user {user['username']}",
             key_info=key_info,
             api_key=full_api_key
         )
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -201,7 +201,7 @@ async def list_api_keys(
 ):
     """
     List API keys with filtering and pagination (Admin only).
-    
+
     Returns a paginated list of API keys with user information
     and optional filtering by user, status, or scope.
     """
@@ -212,7 +212,7 @@ async def list_api_keys(
             user_query = "SELECT id FROM users WHERE username = %s"
             if db.db_type != 'postgresql':
                 user_query = user_query.replace('%s', '?')
-            
+
             user_result = db.execute_query(user_query, (username,))
             if user_result:
                 target_user_id = user_result[0]['id']
@@ -235,10 +235,10 @@ async def list_api_keys(
                         "by_scope": {}
                     }
                 )
-        
+
         # Calculate offset
         offset = (page - 1) * page_size
-        
+
         # Get API keys with filtering
         api_keys = await api_key_service.list_api_keys(
             db=db,
@@ -247,49 +247,49 @@ async def list_api_keys(
             limit=page_size,
             offset=offset
         )
-        
+
         # Filter by scope if specified
         if scope:
             api_keys = [key for key in api_keys if key.permissions_scope == scope]
-        
+
         # Get total count for pagination
         count_query = """
             SELECT COUNT(*) as total,
-                   SUM(CASE WHEN is_active = %s THEN 1 ELSE 0 END) as active_count,
-                   SUM(CASE WHEN is_active = %s THEN 1 ELSE 0 END) as inactive_count
+                   SUM(CASE WHEN ak.is_active = %s THEN 1 ELSE 0 END) as active_count,
+                   SUM(CASE WHEN ak.is_active = %s THEN 1 ELSE 0 END) as inactive_count,
             FROM api_keys ak
             JOIN users u ON ak.user_id = u.id
             WHERE 1=1
         """
         count_params = [True, False]
-        
+
         if target_user_id:
             count_query += " AND ak.user_id = %s"
             count_params.append(target_user_id)
-        
+
         if active_only:
             count_query += " AND ak.is_active = %s"
             count_params.append(True)
-        
+
         if db.db_type != 'postgresql':
             count_query = count_query.replace('%s', '?')
-        
+
         count_result = db.execute_query(count_query, count_params)
         total_count = count_result[0]['total'] if count_result else 0
         active_count = count_result[0]['active_count'] if count_result else 0
         inactive_count = count_result[0]['inactive_count'] if count_result else 0
-        
+
         # Calculate pagination info
         total_pages = (total_count + page_size - 1) // page_size
         has_next = page < total_pages
         has_prev = page > 1
-        
+
         # Create summary statistics
         scope_counts = {}
         for key in api_keys:
             scope = key.permissions_scope.value
             scope_counts[scope] = scope_counts.get(scope, 0) + 1
-        
+
         return AdminAPIKeyListResponse(
             data=api_keys,
             pagination={
@@ -307,7 +307,7 @@ async def list_api_keys(
                 "by_scope": scope_counts
             }
         )
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -327,29 +327,29 @@ async def get_api_key(
 ):
     """
     Get detailed information about a specific API key (Admin only).
-    
+
     Returns complete API key information including usage statistics.
     """
     try:
         # Get API key with user info
         api_key = await api_key_service.get_api_key_by_id(key_id, db, include_user_info=True)
-        
+
         if not api_key:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="API key not found"
             )
-        
+
         # Get usage statistics
         usage_stats = await api_key_service.get_api_key_usage_stats(key_id, db)
-        
+
         return {
             "success": True,
             "message": "API key retrieved successfully",
             "api_key": api_key.dict(),
             "usage_stats": usage_stats.dict() if usage_stats else None
         }
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -370,32 +370,32 @@ async def update_api_key(
 ):
     """
     Update API key metadata (Admin only).
-    
+
     Allows updating name, description, active status, and expiration date.
     Cannot update permissions scope after creation for security.
     """
     try:
         # Update API key
         updated_key = await api_key_service.update_api_key(key_id, request, db)
-        
+
         if not updated_key:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="API key not found"
             )
-        
+
         # Log admin action
         logger.info(
             f"Admin {admin.username} updated API key {key_id}. "
             f"Changes: {request.dict(exclude_none=True)}"
         )
-        
+
         return APIKeyActionResponse(
             message=f"API key {key_id} updated successfully",
             action="update",
             api_key_id=key_id
         )
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -416,43 +416,43 @@ async def revoke_api_key(
 ):
     """
     Revoke (deactivate) an API key (Admin only).
-    
+
     Deactivates the API key immediately, preventing further use.
     The key remains in the database for audit purposes.
     """
     try:
         # Get API key info before revoking
         api_key = await api_key_service.get_api_key_by_id(key_id, db, include_user_info=True)
-        
+
         if not api_key:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="API key not found"
             )
-        
+
         # Revoke API key
         reason = request.reason if request else None
         success = await api_key_service.revoke_api_key(key_id, reason, db)
-        
+
         if not success:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="API key not found or already revoked"
             )
-        
+
         # Log admin action
         logger.info(
             f"Admin {admin.username} revoked API key {key_id} "
             f"belonging to user {api_key.user_username}. "
             f"Reason: {reason or 'No reason provided'}"
         )
-        
+
         return APIKeyActionResponse(
             message=f"API key {key_id} revoked successfully",
             action="revoke",
             api_key_id=key_id
         )
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -476,7 +476,7 @@ async def get_api_key_stats(
 ):
     """
     Get usage statistics for an API key (Admin only).
-    
+
     Returns detailed usage metrics including request counts,
     most used endpoints, and activity patterns.
     """
@@ -488,10 +488,10 @@ async def get_api_key_stats(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="API key not found"
             )
-        
+
         # Get usage statistics
         stats = await api_key_service.get_api_key_usage_stats(key_id, db)
-        
+
         if not stats:
             # Create empty stats if none found
             stats = APIKeyUsageStats(
@@ -504,9 +504,9 @@ async def get_api_key_stats(
                 last_used_at=None,
                 created_at=api_key.created_at
             )
-        
+
         return APIKeyStatsResponse(stats=stats)
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -524,60 +524,60 @@ async def get_api_keys_summary(
 ):
     """
     Get overall API key system statistics (Admin only).
-    
+
     Returns system-wide metrics for API key usage and distribution.
     """
     try:
         # Get overall statistics
         if db.db_type == 'postgresql':
             stats_query = """
-                SELECT 
+                SELECT
                     COUNT(*) as total_keys,
-                    SUM(CASE WHEN is_active = true THEN 1 ELSE 0 END) as active_keys,
-                    SUM(CASE WHEN is_active = false THEN 1 ELSE 0 END) as inactive_keys,
-                    COUNT(DISTINCT user_id) as unique_users,
-                    permissions_scope,
+                    SUM(CASE WHEN ak.is_active = true THEN 1 ELSE 0 END) as active_keys,
+                    SUM(CASE WHEN ak.is_active = false THEN 1 ELSE 0 END) as inactive_keys,
+                    COUNT(DISTINCT ak.user_id) as unique_users,
+                    ak.permissions_scope,
                     COUNT(*) as scope_count
-                FROM api_keys 
-                GROUP BY permissions_scope
+                FROM api_keys ak
+                GROUP BY ak.permissions_scope
                 ORDER BY scope_count DESC
             """
             params = ()
         else:
             stats_query = """
-                SELECT 
+                SELECT
                     COUNT(*) as total_keys,
                     SUM(CASE WHEN is_active = 1 THEN 1 ELSE 0 END) as active_keys,
                     SUM(CASE WHEN is_active = 0 THEN 1 ELSE 0 END) as inactive_keys,
                     COUNT(DISTINCT user_id) as unique_users,
                     permissions_scope,
                     COUNT(*) as scope_count
-                FROM api_keys 
+                FROM api_keys
                 GROUP BY permissions_scope
                 ORDER BY scope_count DESC
             """
             params = ()
-        
+
         results = db.execute_query(stats_query, params)
-        
+
         # Process results
         total_keys = 0
         active_keys = 0
         inactive_keys = 0
         unique_users = 0
         scope_distribution = {}
-        
+
         if results:
             # Get totals from first row
             total_keys = results[0]['total_keys']
             active_keys = results[0]['active_keys']
             inactive_keys = results[0]['inactive_keys']
             unique_users = results[0]['unique_users']
-            
+
             # Get scope distribution
             for row in results:
                 scope_distribution[row['permissions_scope']] = row['scope_count']
-        
+
         # Get recent activity
         if db.db_type == 'postgresql':
             recent_query = """
@@ -591,10 +591,10 @@ async def get_api_keys_summary(
                 FROM api_key_usage_log
                 WHERE request_timestamp > datetime('now', '-24 hours')
             """
-        
+
         recent_result = db.execute_query(recent_query, ())
         recent_usage = recent_result[0]['recent_usage'] if recent_result else 0
-        
+
         return {
             "success": True,
             "message": "API key system statistics retrieved",
@@ -608,7 +608,7 @@ async def get_api_keys_summary(
                 "generated_at": datetime.now(timezone.utc).isoformat()
             }
         }
-        
+
     except Exception as e:
         logger.error(f"Failed to get API key system summary: {e}")
         raise HTTPException(
@@ -631,7 +631,7 @@ async def get_user_api_keys(
 ):
     """
     Get all API keys for a specific user (Admin only).
-    
+
     Returns all API keys belonging to the specified user.
     """
     try:
@@ -639,16 +639,16 @@ async def get_user_api_keys(
         user_query = "SELECT username, email FROM users WHERE id = %s"
         if db.db_type != 'postgresql':
             user_query = user_query.replace('%s', '?')
-        
+
         user_result = db.execute_query(user_query, (user_id,))
         if not user_result:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="User not found"
             )
-        
+
         user = user_result[0]
-        
+
         # Get user's API keys
         api_keys = await api_key_service.list_api_keys(
             db=db,
@@ -657,13 +657,13 @@ async def get_user_api_keys(
             limit=100,
             offset=0
         )
-        
+
         return APIKeyListResponse(
             message=f"API keys for user {user['username']} retrieved successfully",
             data=api_keys,
             total_count=len(api_keys)
         )
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -684,7 +684,7 @@ async def revoke_all_user_api_keys(
 ):
     """
     Revoke all API keys for a user (Admin only).
-    
+
     Emergency function to immediately revoke all of a user's API keys.
     """
     try:
@@ -692,16 +692,16 @@ async def revoke_all_user_api_keys(
         user_query = "SELECT username, email FROM users WHERE id = %s"
         if db.db_type != 'postgresql':
             user_query = user_query.replace('%s', '?')
-        
+
         user_result = db.execute_query(user_query, (user_id,))
         if not user_result:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="User not found"
             )
-        
+
         user = user_result[0]
-        
+
         # Get all active API keys for user
         api_keys = await api_key_service.list_api_keys(
             db=db,
@@ -710,37 +710,37 @@ async def revoke_all_user_api_keys(
             limit=1000,
             offset=0
         )
-        
+
         if not api_keys:
             return APIKeyActionResponse(
                 message=f"No active API keys found for user {user['username']}",
                 action="revoke_all",
                 api_key_id="none"
             )
-        
+
         # Revoke all keys
         revoked_count = 0
         for api_key in api_keys:
             success = await api_key_service.revoke_api_key(
-                api_key.key_id, 
+                api_key.key_id,
                 f"Bulk revocation: {reason}" if reason else "Bulk revocation by admin",
                 db
             )
             if success:
                 revoked_count += 1
-        
+
         # Log admin action
         logger.info(
             f"Admin {admin.username} revoked all API keys for user {user['username']} "
             f"({user_id}). Revoked {revoked_count} keys. Reason: {reason or 'No reason provided'}"
         )
-        
+
         return APIKeyActionResponse(
             message=f"Revoked {revoked_count} API keys for user {user['username']}",
             action="revoke_all",
             api_key_id=f"bulk_{revoked_count}_keys"
         )
-        
+
     except HTTPException:
         raise
     except Exception as e:

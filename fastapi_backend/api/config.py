@@ -131,7 +131,7 @@ class Settings:
         # CORS settings
         self.CORS_ORIGINS: List[str] = config(
             "CORS_ORIGINS",
-            default=["http://localhost:3000", "http://localhost:8080"] if self.DEBUG else [],
+            default="http://localhost:3000,http://localhost:8080" if self.DEBUG else "",
             cast=Csv()
         )
         self.CORS_ALLOW_CREDENTIALS: bool = config("CORS_ALLOW_CREDENTIALS", default=True, cast=bool)

@@ -14,7 +14,7 @@ from pydantic import BaseModel, EmailStr, Field, validator
 
 from api.dependencies import get_database
 from api.database import DatabaseManager
-from api.jwt_service import password_service
+from api.api_key_service import get_api_key_service
 from api.auth_dependencies import require_admin, AuthenticatedUser
 
 logger = logging.getLogger(__name__)
@@ -214,8 +214,8 @@ async def get_admin_stats(
 
         # Users by role
         role_query = """
-            SELECT COALESCE(role, 'trader') as role, COUNT(*) as count 
-            FROM users 
+            SELECT COALESCE(role, 'trader') as role, COUNT(*) as count
+            FROM users
             GROUP BY COALESCE(role, 'trader')
         """
         role_results = db.execute_query(role_query)
@@ -234,7 +234,7 @@ async def get_admin_stats(
         else:
             recent_query = "SELECT COUNT(*) as count FROM users WHERE created_at >= datetime('now', '-7 days')"
             recent_result = db.execute_query(recent_query)
-        
+
         recent_registrations = recent_result[0]['count'] if recent_result else 0
 
         await log_admin_action(admin_user, "view_stats", "system", {"stats_requested": True})
@@ -270,7 +270,7 @@ async def create_user(
 ):
     """
     Create a new user (Admin Only)
-    
+
     Creates a new user with a temporary password that must be changed on first login.
     Only accessible to users with admin role.
     """
@@ -279,7 +279,7 @@ async def create_user(
         email_check_query = "SELECT id FROM users WHERE email = {}"
         email_check_query = email_check_query.format('%s' if db.db_type == 'postgresql' else '?')
         existing_email = db.execute_query(email_check_query, (request.email,))
-        
+
         if existing_email:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -288,7 +288,7 @@ async def create_user(
 
         # Generate unique username
         username = generate_username(request.email, db)
-        
+
         # Generate temporary password
         temporary_password = generate_temporary_password()
         password_hash = password_service.hash_password(temporary_password)
@@ -326,9 +326,9 @@ async def create_user(
         db.execute_command(insert_query, params)
 
         await log_admin_action(
-            admin_user, 
-            "create_user", 
-            user_id, 
+            admin_user,
+            "create_user",
+            user_id,
             {"email": request.email, "role": request.role, "username": username}
         )
 
@@ -422,9 +422,9 @@ async def search_users(
             })
 
         await log_admin_action(
-            admin_user, 
-            "search_users", 
-            "system", 
+            admin_user,
+            "search_users",
+            "system",
             {"query": query, "results_count": len(users)}
         )
 
@@ -568,9 +568,9 @@ async def list_users(
             ))
 
         await log_admin_action(
-            admin_user, 
-            "list_users", 
-            "system", 
+            admin_user,
+            "list_users",
+            "system",
             {"page": page, "filters": {"active_only": active_only, "role_filter": role_filter}}
         )
 
@@ -620,9 +620,9 @@ async def update_user_role(
         db.execute_command(update_query, params)
 
         await log_admin_action(
-            admin_user, 
-            "update_user_role", 
-            user_id, 
+            admin_user,
+            "update_user_role",
+            user_id,
             {
                 "old_role": current_role,
                 "new_role": request.role,
@@ -692,9 +692,9 @@ async def update_user_status(
 
         action = "activate_user" if request.is_active else "deactivate_user"
         await log_admin_action(
-            admin_user, 
-            action, 
-            user_id, 
+            admin_user,
+            action,
+            user_id,
             {
                 "old_status": current_status,
                 "new_status": request.is_active,
@@ -750,8 +750,8 @@ async def reset_user_password(
 
         # Update password and force password change
         update_query = """
-            UPDATE users 
-            SET password_hash = {}, must_change_password = {}, updated_at = {} 
+            UPDATE users
+            SET password_hash = {}, must_change_password = {}, updated_at = {}
             WHERE id = {}
         """
         if db.db_type == 'postgresql':
@@ -764,9 +764,9 @@ async def reset_user_password(
         db.execute_command(update_query, params)
 
         await log_admin_action(
-            admin_user, 
-            "reset_user_password", 
-            user_id, 
+            admin_user,
+            "reset_user_password",
+            user_id,
             {
                 "reason": request.reason,
                 "target_username": username,
