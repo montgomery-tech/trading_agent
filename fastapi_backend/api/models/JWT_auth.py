@@ -13,7 +13,7 @@ import re
 class UserRole(str, Enum):
     """User roles for access control"""
     ADMIN = "admin"
-    TRADER = "trader" 
+    TRADER = "trader"
     VIEWER = "viewer"
 
 
@@ -33,7 +33,7 @@ class LoginRequest(BaseModel):
     username: str = Field(..., min_length=3, max_length=50)
     password: str = Field(..., min_length=1)
     remember_me: bool = Field(False, description="Extend session duration")
-    
+
     @validator('username')
     def validate_username(cls, v):
         return v.strip()
@@ -71,27 +71,27 @@ class PasswordChangeRequest(BaseModel):
     current_password: Optional[str] = Field(None, description="Current password (not required for forced change)")
     new_password: str = Field(..., min_length=8, max_length=128)
     confirm_password: str = Field(..., min_length=8, max_length=128)
-    
+
     @validator('new_password')
     def validate_new_password(cls, v):
         """Validate password strength"""
         if len(v) < 8:
             raise ValueError('Password must be at least 8 characters long')
-        
+
         # Check for at least one uppercase letter
         if not re.search(r'[A-Z]', v):
             raise ValueError('Password must contain at least one uppercase letter')
-        
+
         # Check for at least one lowercase letter
         if not re.search(r'[a-z]', v):
             raise ValueError('Password must contain at least one lowercase letter')
-        
+
         # Check for at least one number
         if not re.search(r'\d', v):
             raise ValueError('Password must contain at least one number')
-        
+
         return v
-    
+
     @validator('confirm_password')
     def passwords_match(cls, v, values):
         if 'new_password' in values and v != values['new_password']:
@@ -114,24 +114,24 @@ class ForcedPasswordChangeRequest(BaseModel):
     new_password: str = Field(..., min_length=8, max_length=128)
     confirm_password: str = Field(..., min_length=8, max_length=128)
     temporary_token: str = Field(..., description="Temporary token from login")
-    
+
     @validator('new_password')
     def validate_new_password(cls, v):
         """Validate password strength"""
         if len(v) < 8:
             raise ValueError('Password must be at least 8 characters long')
-        
+
         if not re.search(r'[A-Z]', v):
             raise ValueError('Password must contain at least one uppercase letter')
-        
+
         if not re.search(r'[a-z]', v):
             raise ValueError('Password must contain at least one lowercase letter')
-        
+
         if not re.search(r'\d', v):
             raise ValueError('Password must contain at least one number')
-        
+
         return v
-    
+
     @validator('confirm_password')
     def passwords_match(cls, v, values):
         if 'new_password' in values and v != values['new_password']:
@@ -198,24 +198,24 @@ class PasswordResetConfirm(BaseModel):
     token: str = Field(..., description="Password reset token")
     new_password: str = Field(..., min_length=8, max_length=128)
     confirm_password: str = Field(..., min_length=8, max_length=128)
-    
+
     @validator('new_password')
     def validate_new_password(cls, v):
         """Validate password strength"""
         if len(v) < 8:
             raise ValueError('Password must be at least 8 characters long')
-        
+
         if not re.search(r'[A-Z]', v):
             raise ValueError('Password must contain at least one uppercase letter')
-        
+
         if not re.search(r'[a-z]', v):
             raise ValueError('Password must contain at least one lowercase letter')
-        
+
         if not re.search(r'\d', v):
             raise ValueError('Password must contain at least one number')
-        
+
         return v
-    
+
     @validator('confirm_password')
     def passwords_match(cls, v, values):
         if 'new_password' in values and v != values['new_password']:

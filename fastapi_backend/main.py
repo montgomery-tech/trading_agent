@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
 FastAPI Balance Tracking System - Main Application
-API Key Authentication Only - JWT Removed
+Using API Key Authentication (JWT authentication removed)
+FIXED: Database properly stored in app.state for dependency injection
 """
 
 import logging
@@ -30,6 +31,7 @@ logger = logging.getLogger(__name__)
 # Database manager
 db_manager = DatabaseManager(settings.DATABASE_URL)
 
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan events"""
@@ -37,7 +39,12 @@ async def lifespan(app: FastAPI):
     try:
         logger.info("🚀 Starting Balance Tracking API with API Key Authentication")
         db_manager.connect()
+
+        # 🔑 CRITICAL FIX: Store database in app.state for dependency injection
+        app.state.database = db_manager
+
         logger.info("✅ Database connection established")
+        logger.info("✅ Database stored in app.state for dependency injection")
         yield
     except Exception as e:
         logger.error(f"❌ Startup failed: {e}")
@@ -50,7 +57,8 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.error(f"❌ Error closing database: {e}")
 
-# Create FastAPI app
+
+# Create FastAPI application
 app = FastAPI(
     title=settings.PROJECT_NAME,
     version=settings.VERSION,
@@ -131,10 +139,11 @@ app.include_router(
     tags=["Trading Pairs"]
 )
 
+
 # Root endpoints
 @app.get("/")
 async def root():
-    """API root endpoint with API key authentication info"""
+    """API root endpoint with authentication and security info"""
     return {
         "message": f"{settings.PROJECT_NAME} API",
         "version": settings.VERSION,
@@ -150,54 +159,55 @@ async def root():
         "documentation": "/docs",
         "endpoints": {
             "health": "/health",
-            "admin": f"{settings.API_V1_PREFIX}/admin",
             "api_key_management": f"{settings.API_V1_PREFIX}/admin/api-keys",
             "users": f"{settings.API_V1_PREFIX}/users",
             "balances": f"{settings.API_V1_PREFIX}/balances",
             "transactions": f"{settings.API_V1_PREFIX}/transactions",
             "currencies": f"{settings.API_V1_PREFIX}/currencies",
-            "trades": f"{settings.API_V1_PREFIX}/trades"
+            "trades": f"{settings.API_V1_PREFIX}/trades",
+            "trading_pairs": "/api/v1/trading-pairs"
         },
-        "api_key_info": {
-            "format": "Bearer <api_key>",
-            "header": "Authorization",
-            "example": "Authorization: Bearer btapi_xxxxxxxxxxxxxxxx_yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
-            "management": f"{settings.API_V1_PREFIX}/admin/api-keys",
-            "permissions": {
-                "inherit": "User's role permissions",
-                "read_only": "Read-only access",
-                "full_access": "Full access (admin only)"
-            }
+        "api_key_scopes": {
+            "read_only": "Read access to user data",
+            "read_write": "Read and write access to user data",
+            "inherit": "Inherit user permissions",
+            "full_access": "Full access (admin users only)"
         },
-        "kraken_status": {
-            "api_configured": bool(getattr(settings, 'KRAKEN_API_KEY', False)),
-            "live_trading": str(getattr(settings, 'ENABLE_LIVE_TRADING', 'false')).lower(),
-            "trading_endpoint": f"{settings.API_V1_PREFIX}/trades/execute-simple"
+        "getting_started": {
+            "step_1": "Contact admin to create your API key",
+            "step_2": "Include API key in Authorization header: 'Bearer <api_key>'",
+            "step_3": "Make requests to protected endpoints",
+            "example": f"curl -H 'Authorization: Bearer <api_key>' {settings.API_V1_PREFIX}/balances"
         }
     }
+
 
 @app.get("/health")
 async def health_check():
     """Health check endpoint"""
     try:
-        # Basic health check
+        # Test database connection
+        app.state.database.test_connection()
+
         return {
             "status": "healthy",
             "timestamp": datetime.now(timezone.utc).isoformat(),
+            "service": settings.PROJECT_NAME,
             "version": settings.VERSION,
-            "authentication": {
-                "api_key_enabled": True,
-                "admin_managed": True
-            },
+            "authentication": "API Key Authentication",
             "database": {
-                "type": getattr(settings, 'DATABASE_TYPE', 'postgresql'),
-                "connected": True  # Simple check - could enhance with actual DB ping
-            },
-            "environment": getattr(settings, 'ENVIRONMENT', 'development')
+                "status": "connected",
+                "type": settings.DATABASE_TYPE
+            }
         }
     except Exception as e:
         logger.error(f"Health check failed: {e}")
-        raise HTTPException(status_code=503, detail="Service unavailable")
+        return {
+            "status": "unhealthy",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "error": str(e)
+        }
+
 
 if __name__ == "__main__":
     import uvicorn

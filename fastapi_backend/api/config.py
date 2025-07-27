@@ -239,14 +239,6 @@ class Settings:
         errors = []
         warnings = []
 
-        # Critical security validation
-        if not self.SECRET_KEY:
-            errors.append("SECRET_KEY is required and cannot be empty")
-        elif self.SECRET_KEY == "your-secret-key-change-in-production":
-            errors.append("SECRET_KEY must be changed from default value for production")
-        elif len(self.SECRET_KEY) < 32:
-            errors.append("SECRET_KEY must be at least 32 characters long")
-
         # Production-specific validations
         if self.ENVIRONMENT == Environment.PRODUCTION:
             if self.DEBUG:
@@ -279,11 +271,6 @@ class Settings:
             if self.RATE_LIMIT_REQUESTS_PER_MINUTE <= 0:
                 errors.append("RATE_LIMIT_REQUESTS_PER_MINUTE must be positive")
 
-        # JWT validation
-        if self.JWT_EXPIRE_MINUTES <= 0:
-            errors.append("JWT_EXPIRE_MINUTES must be positive")
-        if self.JWT_REFRESH_EXPIRE_DAYS <= 0:
-            errors.append("JWT_REFRESH_EXPIRE_DAYS must be positive")
 
         # Log validation results
         if errors:
