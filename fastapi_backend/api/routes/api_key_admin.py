@@ -256,7 +256,7 @@ async def list_api_keys(
         count_query = """
             SELECT COUNT(*) as total,
                    SUM(CASE WHEN ak.is_active = %s THEN 1 ELSE 0 END) as active_count,
-                   SUM(CASE WHEN ak.is_active = %s THEN 1 ELSE 0 END) as inactive_count,
+                   SUM(CASE WHEN ak.is_active = %s THEN 1 ELSE 0 END) as inactive_count
             FROM api_keys ak
             JOIN users u ON ak.user_id = u.id
             WHERE 1=1

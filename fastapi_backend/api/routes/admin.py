@@ -1,6 +1,7 @@
+#!/usr/bin/env python3
 """
-Enhanced Admin Routes for Balance Tracking API with Authentication Protection
-Complete admin management features with JWT-based authentication and role-based access control
+Enhanced Admin Routes for Balance Tracking API with API Key Authentication
+Complete admin management features with API key-based authentication and role-based access control
 """
 
 import uuid
@@ -14,15 +15,15 @@ from pydantic import BaseModel, EmailStr, Field, validator
 
 from api.dependencies import get_database
 from api.database import DatabaseManager
-from api.api_key_service import get_api_key_service
-from api.auth_dependencies import require_admin, AuthenticatedUser
+from api.auth_dependencies import require_admin_api_key, AuthenticatedAPIKeyUser
+from api.password_service import password_service
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
 # =============================================================================
-# All Admin Request/Response Models
+# Request/Response Models
 # =============================================================================
 
 class CreateUserRequest(BaseModel):
@@ -170,7 +171,7 @@ def generate_temporary_password(length: int = 12) -> str:
 
 
 async def log_admin_action(
-    admin_user: AuthenticatedUser,
+    admin_user: AuthenticatedAPIKeyUser,
     action: str,
     target_user_id: str,
     details: Optional[dict] = None
@@ -183,12 +184,12 @@ async def log_admin_action(
 
 
 # =============================================================================
-# Admin Statistics Endpoint (Enhanced)
+# Admin Statistics Endpoint
 # =============================================================================
 
 @router.get("/stats", response_model=AdminStatsResponse)
 async def get_admin_stats(
-    admin_user: AuthenticatedUser = Depends(require_admin()),
+    admin_user: AuthenticatedAPIKeyUser = Depends(require_admin_api_key()),
     db: DatabaseManager = Depends(get_database)
 ):
     """Get comprehensive admin statistics"""
@@ -259,21 +260,16 @@ async def get_admin_stats(
 
 
 # =============================================================================
-# Core Admin User Management Endpoints (Now with Authentication)
+# User Management Endpoints
 # =============================================================================
 
 @router.post("/users", response_model=CreateUserResponse)
 async def create_user(
     request: CreateUserRequest,
-    admin_user: AuthenticatedUser = Depends(require_admin()),
+    admin_user: AuthenticatedAPIKeyUser = Depends(require_admin_api_key()),
     db: DatabaseManager = Depends(get_database)
 ):
-    """
-    Create a new user (Admin Only)
-
-    Creates a new user with a temporary password that must be changed on first login.
-    Only accessible to users with admin role.
-    """
+    """Create a new user (Admin Only)"""
     try:
         # Check if email already exists
         email_check_query = "SELECT id FROM users WHERE email = {}"
@@ -358,7 +354,7 @@ async def search_users(
     role_filter: Optional[str] = None,
     status_filter: Optional[str] = None,
     limit: int = 20,
-    admin_user: AuthenticatedUser = Depends(require_admin()),
+    admin_user: AuthenticatedAPIKeyUser = Depends(require_admin_api_key()),
     db: DatabaseManager = Depends(get_database)
 ):
     """Search users by username, email, or name (Admin Only)"""
@@ -414,7 +410,7 @@ async def search_users(
                 "username": row['username'],
                 "email": row['email'],
                 "full_name": full_name or None,
-                "role": row.get('role', 'viewer'),
+                "role": row.get('role', 'trader'),
                 "is_active": row['is_active'],
                 "is_verified": row['is_verified'],
                 "created_at": row['created_at'],
@@ -448,7 +444,7 @@ async def search_users(
 @router.get("/users/{user_id}", response_model=AdminUserInfo)
 async def get_user(
     user_id: str,
-    admin_user: AuthenticatedUser = Depends(require_admin()),
+    admin_user: AuthenticatedAPIKeyUser = Depends(require_admin_api_key()),
     db: DatabaseManager = Depends(get_database)
 ):
     """Get user details (Admin Only)"""
@@ -504,7 +500,7 @@ async def list_users(
     page_size: int = 20,
     active_only: bool = False,
     role_filter: Optional[str] = None,
-    admin_user: AuthenticatedUser = Depends(require_admin()),
+    admin_user: AuthenticatedAPIKeyUser = Depends(require_admin_api_key()),
     db: DatabaseManager = Depends(get_database)
 ):
     """List all users with filtering options (Admin Only)"""
@@ -589,7 +585,7 @@ async def list_users(
 async def update_user_role(
     user_id: str,
     request: UpdateUserRoleRequest,
-    admin_user: AuthenticatedUser = Depends(require_admin()),
+    admin_user: AuthenticatedAPIKeyUser = Depends(require_admin_api_key()),
     db: DatabaseManager = Depends(get_database)
 ):
     """Update user role (Admin Only)"""
@@ -653,7 +649,7 @@ async def update_user_role(
 async def update_user_status(
     user_id: str,
     request: UpdateUserStatusRequest,
-    admin_user: AuthenticatedUser = Depends(require_admin()),
+    admin_user: AuthenticatedAPIKeyUser = Depends(require_admin_api_key()),
     db: DatabaseManager = Depends(get_database)
 ):
     """Update user status (activate/deactivate) (Admin Only)"""
@@ -726,7 +722,7 @@ async def update_user_status(
 async def reset_user_password(
     user_id: str,
     request: ResetPasswordRequest,
-    admin_user: AuthenticatedUser = Depends(require_admin()),
+    admin_user: AuthenticatedAPIKeyUser = Depends(require_admin_api_key()),
     db: DatabaseManager = Depends(get_database)
 ):
     """Reset user password to a new temporary password (Admin Only)"""
