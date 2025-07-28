@@ -12,6 +12,26 @@ import logging
 import os
 
 from api.models import (
+
+def parse_currency_pair(pair_string: str) -> tuple:
+    """
+    Parse currency pair string like 'BTC-USD' into ('BTC', 'USD')
+    Also handles legacy 'BTCUSD' format
+    """
+    if '-' in pair_string:
+        return tuple(pair_string.split('-', 1))
+    elif len(pair_string) == 6:  # Like BTCUSD
+        return pair_string[:3], pair_string[3:]
+    else:
+        # Try common currency codes
+        common_currencies = ['USD', 'EUR', 'GBP', 'BTC', 'ETH']
+        for currency in common_currencies:
+            if pair_string.endswith(currency):
+                base = pair_string[:-len(currency)]
+                return base, currency
+        # Default fallback
+        return pair_string[:3], pair_string[3:] if len(pair_string) > 3 else pair_string
+
     TradeRequest, TradeResponse, TradeSimulationRequest, TradeSimulationResponse,
     TradeHistoryResponse, DataResponse, ListResponse
 )
@@ -94,7 +114,7 @@ async def get_real_time_pricing(
         # Calculate spread percentage
         bid = Decimal(str(ticker_info["bid"]))
         ask = Decimal(str(ticker_info["ask"]))
-        spread_pct = ((ask - bid) / bid * 100) if bid > 0 else Decimal('0')
+        spread_pct = ((ask - bid) - bid * 100) if bid > 0 else Decimal('0')
         
         pricing_data = {
             "symbol": symbol,

@@ -75,6 +75,11 @@ async def get_currency(
             SELECT code, name, symbol, decimal_places, is_fiat, is_active,
                    created_at, updated_at
             FROM currencies
+            WHERE code = %s
+        """ if db.db_type == "postgresql" else """
+            SELECT code, name, symbol, decimal_places, is_fiat, is_active,
+                   created_at, updated_at
+            FROM currencies
             WHERE code = ?
         """
 

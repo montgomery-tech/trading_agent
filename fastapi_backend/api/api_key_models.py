@@ -279,6 +279,7 @@ class AuthenticatedAPIKeyUser(BaseModel):
     # API key specific fields
     api_key_id: str = Field(..., description="API key identifier used")
     api_key_name: str = Field(..., description="API key name")
+    effective_role: Optional[UserRole] = None  # Computed effective role
     api_key_scope: APIKeyScope = Field(..., description="API key permission scope")
 
     class Config:

@@ -367,8 +367,8 @@ get_current_user = get_current_user_from_api_key
 require_authentication = get_current_user_from_api_key
 require_admin_access = require_admin_api_key()
 require_trader_access = require_trader_or_admin_api_key()
-require_verified_access = require_verified_user_api_key()
-require_verified_trader_access = require_verified_trader_api_key()
+require_verified_access = require_verified_user_api_key()()
+require_verified_trader_access = require_verified_trader_api_key()()
 
 # Resource ownership dependencies
 require_own_resource = require_resource_owner_or_admin_api_key()
@@ -380,8 +380,8 @@ get_current_user_optional = get_current_user_optional_api_key
 
 # Role checking functions (keeping same interface)
 require_roles = require_roles_api_key
-require_admin = require_admin_api_key
-require_trader_or_admin = require_trader_or_admin_api_key
+require_admin = require_admin_api_key()
+require_trader_or_admin = require_trader_or_admin_api_key()
 AuthenticatedUser = AuthenticatedAPIKeyUser
 
 # =============================================================================

@@ -4,6 +4,13 @@ Transaction management routes - PostgreSQL Compatible
 
 from fastapi import APIRouter, HTTPException, Depends
 from api.dependencies import get_database
+def get_db_params(db, *params):
+    """Convert parameters based on database type"""
+    if db.db_type == 'postgresql':
+        return params
+    else:
+        return params
+
 from api.database import DatabaseManager
 from decimal import Decimal
 import logging
@@ -38,7 +45,16 @@ async def get_user_transactions(
         offset = (page - 1) * page_size
 
         # Get user ID
-        query = """
+        # Handle database type differences
+
+        if db.db_type == 'postgresql':
+
+            query = """
+            SELECT id FROM users WHERE username = %s AND is_active = %s"""
+
+        else:
+
+            query = """
             SELECT id FROM users WHERE username = ? AND is_active = ?
         """
         user_results = db.execute_query(query, (username, True))
@@ -52,7 +68,21 @@ async def get_user_transactions(
         user_id = user_results[0]['id']
 
         # Build transactions query
-        query = """
+        # Handle database type differences
+
+        if db.db_type == 'postgresql':
+
+            query = """
+            SELECT id, transaction_type, status, amount, currency_code,
+                   balance_before, balance_after, description, external_reference,
+                   created_at, processed_at
+            FROM transactions
+            WHERE user_id = %s
+        """
+
+        else:
+
+            query = """
             SELECT id, transaction_type, status, amount, currency_code,
                    balance_before, balance_after, description, external_reference,
                    created_at, processed_at
@@ -62,28 +92,28 @@ async def get_user_transactions(
         params = [user_id]
 
         if transaction_type:
-            query += " AND transaction_type = ?"
+            query += " AND transaction_type = %s"
             params.append(transaction_type)
 
         if status:
-            query += " AND status = ?"
+            query += " AND status = %s"
             params.append(status)
 
-        query += " ORDER BY created_at DESC LIMIT ? OFFSET ?"
+        query += " ORDER BY created_at DESC LIMIT %s OFFSET %s"
         params.extend([page_size, offset])
 
         transactions = db.execute_query(query, params)
 
         # Get total count for pagination
-        count_query = "SELECT COUNT(*) as total FROM transactions WHERE user_id = ?"
+        count_query = "SELECT COUNT(*) as total FROM transactions WHERE user_id = %s"
         count_params = [user_id]
 
         if transaction_type:
-            count_query += " AND transaction_type = ?"
+            count_query += " AND transaction_type = %s"
             count_params.append(transaction_type)
 
         if status:
-            count_query += " AND status = ?"
+            count_query += " AND status = %s"
             count_params.append(status)
 
         count_results = db.execute_query(count_query, count_params)
