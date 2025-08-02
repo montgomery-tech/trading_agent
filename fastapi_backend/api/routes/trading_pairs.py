@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 api/routes/trading_pairs.py
-Trading pairs management routes
+Trading pairs management routes - Basic CRUD operations
 """
 
 from fastapi import APIRouter, HTTPException, status, Depends
@@ -12,209 +12,170 @@ import logging
 from api.models import DataResponse, ListResponse
 from api.dependencies import get_database
 from api.database import DatabaseManager
-from api.auth_dependencies import get_current_user
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-@router.get("/", include_in_schema=True)
-@router.get("", include_in_schema=False)
+@router.get("/", response_model=ListResponse, include_in_schema=True)
+@router.get("", response_model=ListResponse, include_in_schema=False)
 async def list_trading_pairs(
     active_only: bool = True,
-    db: DatabaseManager = Depends(get_database),
-    current_user = Depends(get_current_user)
+    db: DatabaseManager = Depends(get_database)
 ):
     """List all available trading pairs"""
     try:
-        # For now, return mock data until database is properly set up
-        mock_trading_pairs = [
-            {
-                "id": 1,
-                "symbol": "BTCUSD",
-                "base_currency": "BTC", 
-                "quote_currency": "USD",
-                "base_currency_name": "Bitcoin",
-                "quote_currency_name": "US Dollar",
-                "is_active": True,
-                "min_trade_amount": "0.001",
-                "max_trade_amount": "100.0",
-                "price_precision": 2,
-                "amount_precision": 8,
-                "created_at": "2024-01-01T00:00:00Z"
-            },
-            {
-                "id": 2,
-                "symbol": "ETHUSD",
-                "base_currency": "ETH",
-                "quote_currency": "USD", 
-                "base_currency_name": "Ethereum",
-                "quote_currency_name": "US Dollar",
-                "is_active": True,
-                "min_trade_amount": "0.01",
-                "max_trade_amount": "1000.0",
-                "price_precision": 2,
-                "amount_precision": 6,
-                "created_at": "2024-01-01T00:00:00Z"
-            },
-            {
-                "id": 3,
-                "symbol": "BTCETH",
-                "base_currency": "BTC",
-                "quote_currency": "ETH",
-                "base_currency_name": "Bitcoin", 
-                "quote_currency_name": "Ethereum",
-                "is_active": True,
-                "min_trade_amount": "0.001",
-                "max_trade_amount": "10.0",
-                "price_precision": 6,
-                "amount_precision": 8,
-                "created_at": "2024-01-01T00:00:00Z"
-            }
-        ]
+        # Try to get real data first
+        if hasattr(db, 'db_type') and db.db_type == "postgresql":
+            query = """
+                SELECT tp.id, tp.symbol, tp.base_currency, tp.quote_currency,
+                       tp.min_trade_amount, tp.max_trade_amount, tp.price_precision,
+                       tp.amount_precision, tp.is_active, tp.created_at, tp.updated_at
+                FROM trading_pairs tp
+            """
+            if active_only:
+                query += " WHERE tp.is_active = true"
+            query += " ORDER BY tp.symbol"
+        else:
+            query = """
+                SELECT tp.id, tp.symbol, tp.base_currency, tp.quote_currency,
+                       tp.min_trade_amount, tp.max_trade_amount, tp.price_precision,
+                       tp.amount_precision, tp.is_active, tp.created_at, tp.updated_at
+                FROM trading_pairs tp
+            """
+            if active_only:
+                query += " WHERE tp.is_active = 1"
+            query += " ORDER BY tp.symbol"
+
+        try:
+            results = db.execute_query(query, [])
+        except Exception:
+            results = []
         
-        # Filter by active status if requested
-        if active_only:
-            mock_trading_pairs = [pair for pair in mock_trading_pairs if pair["is_active"]]
-        
-        return {
-            "success": True,
-            "message": f"Retrieved {len(mock_trading_pairs)} trading pairs",
-            "data": mock_trading_pairs,
-            "total": len(mock_trading_pairs),
-            "active_only": active_only
-        }
-        
+        # If no data in database, return mock data for testing
+        if not results:
+            mock_trading_pairs = [
+                {
+                    "id": "mock-1",
+                    "symbol": "BTC/USD",
+                    "base_currency": "BTC", 
+                    "quote_currency": "USD",
+                    "is_active": True,
+                    "min_trade_amount": 0.001,
+                    "max_trade_amount": 100.0,
+                    "price_precision": 2,
+                    "amount_precision": 8,
+                    "created_at": "2024-01-01T00:00:00Z",
+                    "updated_at": "2024-01-01T00:00:00Z"
+                },
+                {
+                    "id": "mock-2",
+                    "symbol": "ETH/USD",
+                    "base_currency": "ETH",
+                    "quote_currency": "USD", 
+                    "is_active": True,
+                    "min_trade_amount": 0.01,
+                    "max_trade_amount": 1000.0,
+                    "price_precision": 2,
+                    "amount_precision": 6,
+                    "created_at": "2024-01-01T00:00:00Z",
+                    "updated_at": "2024-01-01T00:00:00Z"
+                }
+            ]
+            
+            return ListResponse(
+                success=True,
+                message=f"Retrieved {len(mock_trading_pairs)} trading pairs (mock data)",
+                data=mock_trading_pairs
+            )
+
+        return ListResponse(
+            success=True,
+            message=f"Retrieved {len(results)} trading pairs",
+            data=results
+        )
+
     except Exception as e:
-        logger.error(f"Error retrieving trading pairs: {e}")
+        logger.error(f"Error listing trading pairs: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error retrieving trading pairs: {str(e)}"
         )
 
-@router.get("/{symbol}")
+
+@router.get("/{symbol}", response_model=DataResponse)
 async def get_trading_pair(
     symbol: str,
-    db: DatabaseManager = Depends(get_database),
-    current_user = Depends(get_current_user)
+    db: DatabaseManager = Depends(get_database)
 ):
-    """Get specific trading pair by symbol (e.g., BTCUSD)"""
+    """Get specific trading pair details by symbol"""
     try:
-        # Mock data for specific trading pairs
-        mock_pairs = {
-            "BTCUSD": {
-                "id": 1,
-                "symbol": "BTCUSD",
-                "base_currency": "BTC",
-                "quote_currency": "USD",
-                "base_currency_name": "Bitcoin",
-                "quote_currency_name": "US Dollar",
-                "is_active": True,
-                "min_trade_amount": "0.001",
-                "max_trade_amount": "100.0",
-                "price_precision": 2,
-                "amount_precision": 8,
-                "created_at": "2024-01-01T00:00:00Z",
-                "updated_at": "2024-01-01T00:00:00Z"
-            },
-            "ETHUSD": {
-                "id": 2,
-                "symbol": "ETHUSD", 
-                "base_currency": "ETH",
-                "quote_currency": "USD",
-                "base_currency_name": "Ethereum",
-                "quote_currency_name": "US Dollar",
-                "is_active": True,
-                "min_trade_amount": "0.01",
-                "max_trade_amount": "1000.0",
-                "price_precision": 2,
-                "amount_precision": 6,
-                "created_at": "2024-01-01T00:00:00Z",
-                "updated_at": "2024-01-01T00:00:00Z"
-            },
-            "BTCETH": {
-                "id": 3,
-                "symbol": "BTCETH",
-                "base_currency": "BTC",
-                "quote_currency": "ETH",
-                "base_currency_name": "Bitcoin",
-                "quote_currency_name": "Ethereum", 
-                "is_active": True,
-                "min_trade_amount": "0.001",
-                "max_trade_amount": "10.0",
-                "price_precision": 6,
-                "amount_precision": 8,
-                "created_at": "2024-01-01T00:00:00Z",
-                "updated_at": "2024-01-01T00:00:00Z"
-            }
-        }
+        # Normalize the symbol - handle both BTC/USD and BTCUSD formats
+        normalized_symbol = symbol.upper().strip()
         
-        symbol_upper = symbol.upper()
-        if symbol_upper not in mock_pairs:
+        # Try different symbol formats
+        symbol_variants = [normalized_symbol]
+        
+        if "/" not in normalized_symbol and len(normalized_symbol) >= 6:
+            # Convert BTCUSD to BTC/USD
+            symbol_variants.append(f"{normalized_symbol[:3]}/{normalized_symbol[3:]}")
+        
+        if "/" in normalized_symbol:
+            # Convert BTC/USD to BTCUSD
+            symbol_variants.append(normalized_symbol.replace("/", ""))
+
+        # Try to get real data
+        results = None
+        for variant in symbol_variants:
+            try:
+                if hasattr(db, 'db_type') and db.db_type == "postgresql":
+                    query = "SELECT * FROM trading_pairs WHERE symbol = %s"
+                else:
+                    query = "SELECT * FROM trading_pairs WHERE symbol = ?"
+                results = db.execute_query(query, (variant,))
+                if results:
+                    break
+            except Exception:
+                continue
+
+        # If no data found in database, return mock data for common pairs
+        if not results:
+            if normalized_symbol in ["BTCUSD", "BTC/USD"]:
+                mock_pair = {
+                    "id": "mock-btc-usd",
+                    "symbol": "BTC/USD",
+                    "base_currency": "BTC",
+                    "quote_currency": "USD",
+                    "min_trade_amount": 0.001,
+                    "max_trade_amount": 100.0,
+                    "price_precision": 2,
+                    "amount_precision": 8,
+                    "is_active": True,
+                    "created_at": "2024-01-01T00:00:00Z",
+                    "updated_at": "2024-01-01T00:00:00Z"
+                }
+                
+                return DataResponse(
+                    success=True,
+                    message=f"Retrieved trading pair: {symbol} (mock data)",
+                    data=mock_pair
+                )
+            
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Trading pair '{symbol}' not found"
             )
-        
-        pair_data = mock_pairs[symbol_upper]
-        
+
         return DataResponse(
             success=True,
-            message=f"Retrieved trading pair {symbol}",
-            data=pair_data
-        )
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error retrieving trading pair {symbol}: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error retrieving trading pair {symbol}: {str(e)}"
+            message=f"Retrieved trading pair: {symbol}",
+            data=results[0]
         )
 
-@router.post("/")
-async def create_trading_pair(
-    pair_data: Dict[str, Any],
-    db: DatabaseManager = Depends(get_database),
-    current_user = Depends(get_current_user)
-):
-    """Create a new trading pair (admin only)"""
-    try:
-        # This would normally create in database
-        # For now, return success response
-        
-        required_fields = ["symbol", "base_currency", "quote_currency"]
-        for field in required_fields:
-            if field not in pair_data:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Missing required field: {field}"
-                )
-        
-        mock_created_pair = {
-            "id": 999,
-            "symbol": pair_data["symbol"].upper(),
-            "base_currency": pair_data["base_currency"].upper(),
-            "quote_currency": pair_data["quote_currency"].upper(), 
-            "is_active": pair_data.get("is_active", True),
-            "min_trade_amount": pair_data.get("min_trade_amount", "0.001"),
-            "max_trade_amount": pair_data.get("max_trade_amount", "100.0"),
-            "price_precision": pair_data.get("price_precision", 2),
-            "amount_precision": pair_data.get("amount_precision", 8),
-            "created_at": datetime.utcnow().isoformat() + "Z"
-        }
-        
-        return DataResponse(
-            success=True,
-            message=f"Trading pair '{pair_data['symbol']}' created successfully",
-            data=mock_created_pair
-        )
-        
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error creating trading pair: {e}")
+        logger.error(f"Error retrieving trading pair '{symbol}': {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error creating trading pair: {str(e)}"
+            detail=f"Error retrieving trading pair: {str(e)}"
         )

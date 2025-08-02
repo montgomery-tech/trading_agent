@@ -18,7 +18,7 @@ from api.database import DatabaseManager
 from api.security.middleware import security_exception_handler
 from api.routes import (
     admin, api_key_admin, users, transactions,
-    balances, currencies, trades, simple_trades, spread_management, trading_pairs
+    balances, currencies, trades, simple_trades, spread_management
 )
 
 # Configure logging
@@ -218,11 +218,3 @@ if __name__ == "__main__":
         reload=True if settings.DEBUG else False,
         log_level=settings.LOG_LEVEL.lower()
     )
-
-
-# Include basic trading pairs routes
-app.include_router(
-    trading_pairs.router,
-    prefix=f"{settings.API_V1_PREFIX}/trading-pairs",
-    tags=["Trading Pairs Basic"]
-)
