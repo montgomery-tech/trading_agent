@@ -1,12 +1,12 @@
 """
-Balance management routes - PostgreSQL Compatible
+Balance management routes - With API Key Authentication
 """
 
 from fastapi import APIRouter, HTTPException, Depends
 from api.dependencies import get_database
 from api.database import DatabaseManager
-import logging
 from api.auth_dependencies import require_resource_owner_or_admin, AuthenticatedUser
+import logging
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -19,7 +19,7 @@ async def get_user_balances(
     currency: str = None,
     db: DatabaseManager = Depends(get_database)
 ):
-    """Get balances for a user - PostgreSQL compatible"""
+    """Get balances for a user - Requires authentication"""
     try:
         # First verify user exists and is active
         if db.db_type == 'postgresql':
@@ -95,82 +95,4 @@ async def get_user_balances(
         raise HTTPException(
             status_code=500,
             detail=f"Error retrieving balances: {str(e)}"
-        )
-
-
-@router.get("/summary/{username}")
-async def get_balance_summary(
-    username: str,
-    current_user: AuthenticatedUser = Depends(require_resource_owner_or_admin("username")),
-    db: DatabaseManager = Depends(get_database)
-):
-    """Get balance summary for a user - PostgreSQL compatible"""
-    try:
-        # Verify user exists
-        if db.db_type == 'postgresql':
-            user_query = "SELECT id FROM users WHERE username = %s AND is_active = %s"
-            user_params = (username, True)
-        else:
-            user_query = "SELECT id FROM users WHERE username = ? AND is_active = ?"
-            user_params = (username, 1)
-
-        user_results = db.execute_query(user_query, user_params)
-
-        if not user_results:
-            raise HTTPException(
-                status_code=404,
-                detail=f"User '{username}' not found"
-            )
-
-        user_id = user_results[0]['id']
-
-        # Get balance summary
-        if db.db_type == 'postgresql':
-            summary_query = """
-                SELECT
-                    COUNT(*) as total_currencies,
-                    COUNT(CASE WHEN ub.total_balance > 0 THEN 1 END) as currencies_with_balance,
-                    COUNT(CASE WHEN c.is_fiat = true THEN 1 END) as fiat_currencies,
-                    COUNT(CASE WHEN c.is_fiat = false THEN 1 END) as crypto_currencies
-                FROM user_balances ub
-                JOIN currencies c ON ub.currency_code = c.code
-                WHERE ub.user_id = %s
-            """
-            params = (user_id,)
-        else:
-            summary_query = """
-                SELECT
-                    COUNT(*) as total_currencies,
-                    COUNT(CASE WHEN ub.total_balance > 0 THEN 1 END) as currencies_with_balance,
-                    COUNT(CASE WHEN c.is_fiat = 1 THEN 1 END) as fiat_currencies,
-                    COUNT(CASE WHEN c.is_fiat = 0 THEN 1 END) as crypto_currencies
-                FROM user_balances ub
-                JOIN currencies c ON ub.currency_code = c.code
-                WHERE ub.user_id = ?
-            """
-            params = (user_id,)
-
-        summary_result = db.execute_query(summary_query, params)
-        summary = summary_result[0] if summary_result else {
-            'total_currencies': 0,
-            'currencies_with_balance': 0,
-            'fiat_currencies': 0,
-            'crypto_currencies': 0
-        }
-
-        return {
-            "success": True,
-            "data": {
-                "user": username,
-                "summary": summary
-            }
-        }
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error retrieving balance summary: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Error retrieving balance summary: {str(e)}"
         )
