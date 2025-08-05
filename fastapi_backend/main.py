@@ -3,6 +3,7 @@
 FastAPI Balance Tracking System - Main Application
 Using API Key Authentication (JWT authentication removed)
 FIXED: Database properly stored in app.state for dependency injection
+FIXED: Entity middleware integration
 """
 
 import logging
@@ -20,6 +21,16 @@ from api.routes import (
     admin, api_key_admin, users, transactions,
     balances, currencies, trades, simple_trades, spread_management, trading_pairs
 )
+
+# Entity middleware import with error handling
+try:
+    from api.entity_middleware import add_entity_middleware
+    ENTITY_MIDDLEWARE_AVAILABLE = True
+    print("✅ Entity middleware imports successful")
+except ImportError as e:
+    ENTITY_MIDDLEWARE_AVAILABLE = False
+    print(f"⚠️  Entity middleware not available: {e}")
+    print("   Continuing without entity middleware...")
 
 # Configure logging
 logging.basicConfig(
@@ -45,6 +56,13 @@ async def lifespan(app: FastAPI):
 
         logger.info("✅ Database connection established")
         logger.info("✅ Database stored in app.state for dependency injection")
+
+        # Log entity middleware status
+        if ENTITY_MIDDLEWARE_AVAILABLE:
+            logger.info("✅ Entity middleware is active")
+        else:
+            logger.info("ℹ️  Running without entity middleware")
+
         yield
     except Exception as e:
         logger.error(f"❌ Startup failed: {e}")
@@ -62,7 +80,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title=settings.PROJECT_NAME,
     version=settings.VERSION,
-    description="Balance Tracking System with API Key Authentication",
+    description="Balance Tracking System with API Key Authentication and Entity Management",
     lifespan=lifespan
 )
 
@@ -78,6 +96,15 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH"],
     allow_headers=["*"],
 )
+
+# Add entity middleware AFTER creating app but BEFORE routes
+if ENTITY_MIDDLEWARE_AVAILABLE:
+    try:
+        add_entity_middleware(app, enable_audit_logging=True, enable_security=True)
+        logger.info("✅ Entity middleware added successfully")
+    except Exception as e:
+        logger.warning(f"⚠️  Failed to add entity middleware: {e}")
+        ENTITY_MIDDLEWARE_AVAILABLE = False
 
 # Add enhanced exception handlers
 app.add_exception_handler(HTTPException, security_exception_handler)
@@ -139,6 +166,13 @@ app.include_router(
     tags=["Trading Pairs"]
 )
 
+# Include basic trading pairs routes
+app.include_router(
+    trading_pairs.router,
+    prefix=f"{settings.API_V1_PREFIX}/trading-pairs",
+    tags=["Trading Pairs Basic"]
+)
+
 
 # Root endpoints
 @app.get("/")
@@ -150,11 +184,13 @@ async def root():
         "status": "healthy",
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "authentication": "API Key Authentication",
+        "entity_management": ENTITY_MIDDLEWARE_AVAILABLE,
         "security": {
             "input_validation": "enabled",
             "rate_limiting": "enabled" if getattr(settings, 'RATE_LIMIT_ENABLED', True) else "disabled",
             "security_headers": "enabled",
-            "request_size_limit": f"{getattr(settings, 'MAX_REQUEST_SIZE', 10485760) / 1024 / 1024:.1f}MB"
+            "request_size_limit": f"{getattr(settings, 'MAX_REQUEST_SIZE', 10485760) / 1024 / 1024:.1f}MB",
+            "entity_middleware": "enabled" if ENTITY_MIDDLEWARE_AVAILABLE else "disabled"
         },
         "documentation": "/docs",
         "endpoints": {
@@ -173,11 +209,18 @@ async def root():
             "inherit": "Inherit user permissions",
             "full_access": "Full access (admin users only)"
         },
+        "entity_features": {
+            "entity_scoped_access": "enabled" if ENTITY_MIDDLEWARE_AVAILABLE else "disabled",
+            "multi_tenant_isolation": "enabled" if ENTITY_MIDDLEWARE_AVAILABLE else "disabled",
+            "audit_logging": "enabled" if ENTITY_MIDDLEWARE_AVAILABLE else "disabled",
+            "entity_roles": ["trader", "viewer"] if ENTITY_MIDDLEWARE_AVAILABLE else []
+        },
         "getting_started": {
             "step_1": "Contact admin to create your API key",
-            "step_2": "Include API key in Authorization header: 'Bearer <api_key>'",
-            "step_3": "Make requests to protected endpoints",
-            "example": f"curl -H 'Authorization: Bearer <api_key>' {settings.API_V1_PREFIX}/balances"
+            "step_2": "Admin assigns you to an entity with appropriate role",
+            "step_3": "Include API key in Authorization header: 'Bearer <api_key>'",
+            "step_4": "Access entity-scoped endpoints",
+            "example": f"curl -H 'Authorization: Bearer <api_key>' {settings.API_V1_PREFIX}/entities/{{entity_id}}/balances"
         }
     }
 
@@ -195,9 +238,14 @@ async def health_check():
             "service": settings.PROJECT_NAME,
             "version": settings.VERSION,
             "authentication": "API Key Authentication",
+            "entity_management": ENTITY_MIDDLEWARE_AVAILABLE,
             "database": {
                 "status": "connected",
                 "type": settings.DATABASE_TYPE
+            },
+            "features": {
+                "entity_middleware": "active" if ENTITY_MIDDLEWARE_AVAILABLE else "inactive",
+                "multi_tenant": "enabled" if ENTITY_MIDDLEWARE_AVAILABLE else "disabled"
             }
         }
     except Exception as e:
@@ -218,11 +266,3 @@ if __name__ == "__main__":
         reload=True if settings.DEBUG else False,
         log_level=settings.LOG_LEVEL.lower()
     )
-
-
-# Include basic trading pairs routes
-app.include_router(
-    trading_pairs.router,
-    prefix=f"{settings.API_V1_PREFIX}/trading-pairs",
-    tags=["Trading Pairs Basic"]
-)
