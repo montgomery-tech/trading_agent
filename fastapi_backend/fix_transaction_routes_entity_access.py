@@ -1,4 +1,33 @@
+#!/usr/bin/env python3
 """
+Fix Transaction Routes - Entity Access Control
+Task 2: Update transaction routes to enable entity-wide access for viewers and traders
+
+SCRIPT: fix_transaction_routes_entity_access.py
+
+This script updates the transaction routes to allow:
+- Viewers: READ access to transaction data for any user within their entity
+- Traders: READ + WRITE access (create transactions) for any user within their entity
+"""
+
+import os
+from pathlib import Path
+from datetime import datetime
+
+def create_backup(file_path):
+    """Create backup of existing file"""
+    if os.path.exists(file_path):
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        backup_path = f"{file_path}.backup.{timestamp}"
+        with open(file_path, 'r') as src, open(backup_path, 'w') as dst:
+            dst.write(src.read())
+        print(f"📁 Backup created: {backup_path}")
+        return backup_path
+    return None
+
+def create_updated_transaction_routes():
+    """Create the updated transaction routes with entity-wide access"""
+    return '''"""
 Transaction management routes - With Entity-Wide Access Control
 Updated to allow viewers and traders to access all transaction data within their entity
 Traders can also create transactions for any user within their entity
@@ -531,3 +560,70 @@ async def create_withdrawal(
             status_code=500,
             detail=f"Error creating withdrawal: {str(e)}"
         )
+'''
+
+def main():
+    """Apply the transaction routes entity access fix"""
+    
+    print("🚀 TASK 2: UPDATE TRANSACTION ROUTES - ENTITY-WIDE ACCESS")
+    print("=" * 60)
+    print()
+    print("Updating transaction routes to allow:")
+    print("• Viewers: READ access to transaction data within their entity")
+    print("• Traders: READ + WRITE access (create transactions) within their entity")
+    print()
+    
+    # Ensure api/routes directory exists
+    routes_dir = Path("api/routes")
+    routes_dir.mkdir(parents=True, exist_ok=True)
+    print(f"📁 Ensured directory exists: {routes_dir}")
+    
+    # Target file path
+    transaction_routes_file = routes_dir / "transactions.py"
+    
+    # Create backup if file exists
+    if transaction_routes_file.exists():
+        backup_path = create_backup(str(transaction_routes_file))
+        print(f"✅ Existing file backed up")
+    else:
+        print("📝 Creating new transaction routes file")
+    
+    # Write updated content
+    updated_content = create_updated_transaction_routes()
+    
+    with open(transaction_routes_file, 'w') as f:
+        f.write(updated_content)
+    
+    print(f"✅ Updated: {transaction_routes_file}")
+    print()
+    print("🔍 KEY CHANGES MADE:")
+    print("=" * 30)
+    print("✅ Replaced require_resource_owner_or_admin with require_entity_any_access for READ operations")
+    print("✅ Added require_entity_trader_access for WRITE operations (deposits/withdrawals)")
+    print("✅ Added entity filtering for non-admin users")
+    print("✅ Enhanced access logging with entity context")
+    print("✅ Added entity transaction summary endpoint")
+    print("✅ Added deposit/withdrawal creation with entity verification")
+    print("✅ Both viewers and traders can now access entity-wide transaction data")
+    print("✅ Only traders can create transactions within their entity")
+    print()
+    print("🎯 EXPECTED BEHAVIOR:")
+    print("=" * 25)
+    print("• Viewers: READ access to all transaction data within their entity")
+    print("• Traders: READ access + CREATE transactions for any user within their entity") 
+    print("• Admins: READ + WRITE access to all transaction data across all entities")
+    print("• Cross-entity access: BLOCKED for non-admin users")
+    print()
+    print("📋 NEXT STEPS:")
+    print("=" * 20)
+    print("1. Restart FastAPI server: python3 main.py")
+    print("2. Test viewer access to entity transaction data")
+    print("3. Test trader transaction creation within entity")
+    print("4. Verify cross-entity access is blocked")
+    print("5. Proceed to Task 3: Enhance Entity Authentication Dependencies")
+    print()
+    print("🎉 TASK 2 COMPLETED SUCCESSFULLY!")
+
+
+if __name__ == "__main__":
+    main()

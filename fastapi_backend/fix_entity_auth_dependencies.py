@@ -1,5 +1,36 @@
 #!/usr/bin/env python3
 """
+Fix Entity Authentication Dependencies - Task 3
+Enhanced entity role lookup and authentication dependencies
+
+SCRIPT: fix_entity_auth_dependencies.py
+
+This script fixes the core issues with entity authentication:
+1. Creates entity authentication that doesn't require entity_id in URL paths
+2. Improves multi-entity membership handling  
+3. Adds robust error handling and logging
+4. Provides validation helpers for routes
+"""
+
+import os
+from pathlib import Path
+from datetime import datetime
+
+def create_backup(file_path):
+    """Create backup of existing file"""
+    if os.path.exists(file_path):
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        backup_path = f"{file_path}.backup.{timestamp}"
+        with open(file_path, 'r') as src, open(backup_path, 'w') as dst:
+            dst.write(src.read())
+        print(f"📁 Backup created: {backup_path}")
+        return backup_path
+    return None
+
+def create_enhanced_auth_dependencies():
+    """Create the enhanced entity authentication dependencies"""
+    return '''#!/usr/bin/env python3
+"""
 Enhanced Entity Authentication Dependencies - Fixed for Task 3
 Improved entity role lookup and authentication dependencies for viewer/trader access
 
@@ -457,3 +488,72 @@ require_entity_access = require_entity_any_access  # Alias for backward compatib
 
 # Type alias for compatibility
 AuthenticatedUser = EntityAuthenticatedUser
+'''
+
+def main():
+    """Apply the enhanced entity authentication dependencies"""
+    
+    print("🚀 TASK 3: ENHANCE ENTITY AUTHENTICATION DEPENDENCIES")
+    print("=" * 60)
+    print()
+    print("Improving entity role lookup and authentication dependencies:")
+    print("• Fixed entity authentication that doesn't require entity_id in URL")
+    print("• Enhanced multi-entity membership handling") 
+    print("• Added robust error handling and logging")
+    print("• Created validation helpers for routes")
+    print()
+    
+    # Ensure api directory exists
+    api_dir = Path("api")
+    api_dir.mkdir(parents=True, exist_ok=True)
+    print(f"📁 Ensured directory exists: {api_dir}")
+    
+    # Target file path
+    auth_deps_file = api_dir / "updated_auth_dependencies.py"
+    
+    # Create backup if file exists
+    if auth_deps_file.exists():
+        backup_path = create_backup(str(auth_deps_file))
+        print(f"✅ Existing file backed up")
+    else:
+        print("📝 Creating new enhanced auth dependencies file")
+    
+    # Write updated content
+    updated_content = create_enhanced_auth_dependencies()
+    
+    with open(auth_deps_file, 'w') as f:
+        f.write(updated_content)
+    
+    print(f"✅ Updated: {auth_deps_file}")
+    print()
+    print("🔍 KEY IMPROVEMENTS MADE:")
+    print("=" * 35)
+    print("✅ Fixed require_entity_any_access() to work without entity_id in URL path")
+    print("✅ Enhanced multi-entity membership support with proper role lookup")
+    print("✅ Added comprehensive error handling and logging")
+    print("✅ Created validate_user_entity_access() helper for routes")
+    print("✅ Improved _get_user_entity_context() with better error handling")
+    print("✅ Enhanced entity filtering with debug logging")
+    print("✅ Added EntityAuthenticatedUser.get_entity_role() method")
+    print()
+    print("🎯 EXPECTED BEHAVIOR:")
+    print("=" * 25)
+    print("• require_entity_any_access() works for balance/transaction routes")
+    print("• require_entity_trader_access() properly validates trader operations")
+    print("• Multi-entity users get correct role permissions in each entity")
+    print("• Better error messages and logging for debugging")
+    print("• Robust handling of edge cases (no entities, invalid roles, etc.)")
+    print()
+    print("📋 NEXT STEPS:")
+    print("=" * 20)
+    print("1. Restart FastAPI server: python3 main.py")
+    print("2. Test balance routes with viewer access")
+    print("3. Test transaction routes with viewer/trader access")
+    print("4. Verify enhanced error handling and logging")
+    print("5. Proceed to Task 4: Update User Routes (if needed)")
+    print()
+    print("🎉 TASK 3 COMPLETED SUCCESSFULLY!")
+
+
+if __name__ == "__main__":
+    main()

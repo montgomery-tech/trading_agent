@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Enhanced Entity Authentication Dependencies - Fixed for Task 3
+Enhanced Entity Authentication Dependencies - Fix for Task 3
 Improved entity role lookup and authentication dependencies for viewer/trader access
 
 This fixes the key issues with entity authentication:
@@ -36,24 +36,24 @@ async def get_current_user_with_entity_context(
 ):
     """
     Enhanced authentication that includes entity context.
-    
+
     This is the core authentication function that loads entity information
     for authenticated users.
     """
     from api.auth_dependencies import get_current_user_from_api_key
-    
+
     # Get base authenticated user
     current_user = await get_current_user_from_api_key(credentials, api_key_service)
-    
+
     # Enhance with entity context
     enhanced_user = EntityAuthenticatedUser(**current_user.dict())
-    
+
     # Load entity context for non-admin users
     if enhanced_user.role != UserRole.ADMIN:
         entity_info, accessible_entities = await _get_user_entity_context(enhanced_user.id, db)
         enhanced_user.entity_info = entity_info
         enhanced_user.accessible_entities = accessible_entities
-        
+
         logger.debug(
             f"User {enhanced_user.username} has access to entities: {accessible_entities}"
         )
@@ -61,7 +61,7 @@ async def get_current_user_with_entity_context(
         # Admins have access to all entities
         enhanced_user.accessible_entities = []  # Empty means all entities for admins
         logger.debug(f"Admin user {enhanced_user.username} has access to all entities")
-    
+
     return enhanced_user
 
 
@@ -95,10 +95,10 @@ class EntityAuthenticatedUser(AuthenticatedAPIKeyUser):
         """Get user's role within a specific entity"""
         if self.role == UserRole.ADMIN:
             return "admin"
-        
+
         if self.entity_info and self.entity_info.entity_id == entity_id:
             return self.entity_info.entity_role
-        
+
         # For multi-entity users, we'd need to look this up from the database
         # For now, return None to indicate we need to query
         return None
@@ -110,14 +110,14 @@ async def _get_user_entity_context(
 ) -> tuple[Optional[EntityInfo], List[str]]:
     """
     Get entity context for a user.
-    
+
     Returns:
         Tuple of (primary_entity_info, accessible_entity_ids)
     """
     try:
         if db.db_type == 'postgresql':
             query = """
-                SELECT 
+                SELECT
                     e.id as entity_id,
                     e.code as entity_code,
                     e.name as entity_name,
@@ -132,7 +132,7 @@ async def _get_user_entity_context(
             params = (str(user_id),)
         else:
             query = """
-                SELECT 
+                SELECT
                     e.id as entity_id,
                     e.code as entity_code,
                     e.name as entity_name,
@@ -147,7 +147,7 @@ async def _get_user_entity_context(
             params = (str(user_id),)
 
         memberships = db.execute_query(query, params)
-        
+
         if not memberships:
             logger.warning(f"User {user_id} has no active entity memberships")
             return None, []
@@ -184,7 +184,7 @@ async def _get_user_role_in_entity(
 ) -> str:
     """
     Get user's role within a specific entity.
-    
+
     Enhanced version with better error handling and multi-entity support.
     """
     try:
@@ -204,7 +204,7 @@ async def _get_user_role_in_entity(
             params = (str(user_id), entity_id)
 
         result = db.execute_query(query, params)
-        
+
         if result:
             role = result[0]['entity_role']
             logger.debug(f"User {user_id} has role '{role}' in entity {entity_id}")
@@ -225,7 +225,7 @@ async def _get_user_role_in_entity(
 def require_entity_any_access():
     """
     Dependency to require viewer or trader access within user's entities.
-    
+
     This is the key function that our balance and transaction routes use.
     It doesn't require entity_id in the URL path - instead it validates
     that the user can access entity data in general.
@@ -233,7 +233,7 @@ def require_entity_any_access():
     async def entity_access_checker(
         current_user: EntityAuthenticatedUser = Depends(get_current_user_with_entity_context)
     ) -> EntityAuthenticatedUser:
-        
+
         # Admins bypass entity checks
         if current_user.role == UserRole.ADMIN:
             logger.debug(f"Admin user {current_user.username} granted entity access")
@@ -284,13 +284,13 @@ def require_entity_any_access():
 def require_entity_trader_access():
     """
     Dependency to require trader access within user's entities.
-    
+
     Used for operations that create/modify data (deposits, withdrawals).
     """
     async def trader_access_checker(
         current_user: EntityAuthenticatedUser = Depends(get_current_user_with_entity_context)
     ) -> EntityAuthenticatedUser:
-        
+
         # Admins bypass entity checks
         if current_user.role == UserRole.ADMIN:
             logger.debug(f"Admin user {current_user.username} granted trader access")
@@ -344,7 +344,7 @@ async def get_user_accessible_entity_filter(
 ) -> tuple[str, List[str]]:
     """
     Enhanced entity filter with better error handling.
-    
+
     Returns SQL filter condition to limit queries to user's accessible entities.
     """
     # Admins can access all entities
@@ -389,10 +389,10 @@ async def validate_user_entity_access(
 ) -> tuple[str, str]:
     """
     Validate that the current user can access data for the target username.
-    
+
     Returns:
         Tuple of (target_user_id, target_entity_id)
-        
+
     Raises:
         HTTPException if access is denied
     """

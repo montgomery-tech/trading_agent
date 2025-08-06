@@ -8,7 +8,7 @@ from typing import Optional
 from api.dependencies import get_database
 from api.database import DatabaseManager
 from api.updated_auth_dependencies import (
-    require_entity_any_access, 
+    require_entity_any_access,
     EntityAuthenticatedUser,
     get_user_accessible_entity_filter
 )
@@ -27,7 +27,7 @@ async def get_user_balances(
 ):
     """
     Get balances for a user within the current user's accessible entities.
-    
+
     Both viewers and traders can access balance data for any user within their entity.
     Admins can access balance data for any user across all entities.
     """
@@ -149,15 +149,15 @@ async def get_entity_balances_summary(
 ):
     """
     Get balance summary for all users within the current user's accessible entities.
-    
-    This endpoint allows viewers and traders to see aggregate balance data 
+
+    This endpoint allows viewers and traders to see aggregate balance data
     for their entire entity.
     """
     try:
         # Build entity-filtered summary query
         if db.db_type == 'postgresql':
             query = """
-                SELECT 
+                SELECT
                     u.username,
                     u.entity_id,
                     e.name as entity_name,
@@ -183,7 +183,7 @@ async def get_entity_balances_summary(
         else:
             # SQLite
             query = """
-                SELECT 
+                SELECT
                     u.username,
                     u.entity_id,
                     e.name as entity_name,
@@ -225,7 +225,7 @@ async def get_entity_balances_summary(
         for balance in balances:
             balance['is_fiat'] = bool(balance['is_fiat'])
             entity_id = balance['entity_id']
-            
+
             if entity_id not in entity_balances:
                 entity_balances[entity_id] = {
                     'entity_id': entity_id,
@@ -234,12 +234,12 @@ async def get_entity_balances_summary(
                     'total_users': 0,
                     'total_balances': 0
                 }
-            
+
             username = balance['username']
             if username not in entity_balances[entity_id]['users']:
                 entity_balances[entity_id]['users'][username] = []
                 entity_balances[entity_id]['total_users'] += 1
-            
+
             entity_balances[entity_id]['users'][username].append({
                 'currency_code': balance['currency_code'],
                 'currency_name': balance['currency_name'],
@@ -286,7 +286,7 @@ async def get_user_balance_summary(
 ):
     """
     Get balance summary statistics for a specific user within accessible entities.
-    
+
     Provides aggregate statistics like total currencies, fiat vs crypto breakdown, etc.
     """
     try:
@@ -321,7 +321,7 @@ async def get_user_balance_summary(
         # Get balance summary statistics
         if db.db_type == 'postgresql':
             summary_query = """
-                SELECT 
+                SELECT
                     COUNT(DISTINCT ub.currency_code) as total_currencies,
                     COUNT(CASE WHEN ub.total_balance > 0 THEN 1 END) as currencies_with_balance,
                     COUNT(CASE WHEN c.is_fiat = true THEN 1 END) as fiat_currencies,
@@ -335,7 +335,7 @@ async def get_user_balance_summary(
             params = (user_id,)
         else:
             summary_query = """
-                SELECT 
+                SELECT
                     COUNT(DISTINCT ub.currency_code) as total_currencies,
                     COUNT(CASE WHEN ub.total_balance > 0 THEN 1 END) as currencies_with_balance,
                     COUNT(CASE WHEN c.is_fiat = 1 THEN 1 END) as fiat_currencies,
@@ -347,7 +347,7 @@ async def get_user_balance_summary(
                 WHERE ub.user_id = ?
             """
             params = (user_id,)
-        
+
         summary_result = db.execute_query(summary_query, params)
         summary = summary_result[0] if summary_result else {
             'total_currencies': 0,
@@ -362,7 +362,7 @@ async def get_user_balance_summary(
             f"User {current_user.username} (role: {current_user.role.value}) "
             f"accessed balance summary for user {username} in entity {target_entity_id}"
         )
-        
+
         return {
             "success": True,
             "data": {
@@ -375,12 +375,12 @@ async def get_user_balance_summary(
                 }
             }
         }
-        
+
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Error retrieving balance summary for user {username}: {e}")
         raise HTTPException(
-            status_code=500, 
+            status_code=500,
             detail=f"Error retrieving balance summary: {str(e)}"
         )

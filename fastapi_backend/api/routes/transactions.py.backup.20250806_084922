@@ -10,7 +10,7 @@ from api.dependencies import get_database
 from api.database import DatabaseManager
 from api.updated_auth_dependencies import (
     require_entity_any_access,
-    require_entity_trader_access, 
+    require_entity_trader_access,
     EntityAuthenticatedUser,
     get_user_accessible_entity_filter
 )
@@ -32,7 +32,7 @@ async def get_user_transactions(
 ):
     """
     Get transactions for a user within the current user's accessible entities.
-    
+
     Both viewers and traders can access transaction data for any user within their entity.
     Admins can access transaction data for any user across all entities.
     """
@@ -44,15 +44,15 @@ async def get_user_transactions(
         else:
             user_query = "SELECT id, entity_id FROM users WHERE username = ? AND is_active = ?"
             user_params = (username, 1)
-        
+
         user_results = db.execute_query(user_query, user_params)
-        
+
         if not user_results:
             raise HTTPException(
-                status_code=404, 
+                status_code=404,
                 detail=f"User '{username}' not found or inactive"
             )
-        
+
         target_user = user_results[0]
         user_id = target_user['id']
         target_entity_id = target_user.get('entity_id')
@@ -64,7 +64,7 @@ async def get_user_transactions(
                     status_code=403,
                     detail=f"Access denied. User '{username}' is not within your accessible entities"
                 )
-        
+
         # Build transactions query with entity filtering
         if db.db_type == 'postgresql':
             query = """
@@ -133,7 +133,7 @@ async def get_user_transactions(
             f"User {current_user.username} (role: {current_user.role.value}) "
             f"accessed {len(transactions)} transactions for user {username} in entity {target_entity_id}"
         )
-        
+
         return {
             "success": True,
             "data": transactions,
@@ -149,7 +149,7 @@ async def get_user_transactions(
                 "entity_access": "admin" if current_user.role.value == 'admin' else "entity_member"
             }
         }
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -172,15 +172,15 @@ async def get_entity_transactions_summary(
 ):
     """
     Get transaction summary for all users within the current user's accessible entities.
-    
-    This endpoint allows viewers and traders to see transaction data 
+
+    This endpoint allows viewers and traders to see transaction data
     for their entire entity.
     """
     try:
         # Build entity-filtered transactions query
         if db.db_type == 'postgresql':
             query = """
-                SELECT 
+                SELECT
                     t.id, t.transaction_type, t.status, t.amount, t.currency_code,
                     t.balance_before, t.balance_after, t.description, t.created_at, t.processed_at,
                     u.username, u.entity_id, e.name as entity_name,
@@ -207,7 +207,7 @@ async def get_entity_transactions_summary(
         else:
             # SQLite
             query = """
-                SELECT 
+                SELECT
                     t.id, t.transaction_type, t.status, t.amount, t.currency_code,
                     t.balance_before, t.balance_after, t.description, t.created_at, t.processed_at,
                     u.username, u.entity_id, e.name as entity_name,
@@ -250,7 +250,7 @@ async def get_entity_transactions_summary(
         entity_transactions = {}
         for transaction in transactions:
             entity_id = transaction['entity_id']
-            
+
             if entity_id not in entity_transactions:
                 entity_transactions[entity_id] = {
                     'entity_id': entity_id,
@@ -258,7 +258,7 @@ async def get_entity_transactions_summary(
                     'transactions': [],
                     'total_transactions': 0
                 }
-            
+
             entity_transactions[entity_id]['transactions'].append({
                 'id': transaction['id'],
                 'transaction_type': transaction['transaction_type'],
@@ -315,7 +315,7 @@ async def create_deposit(
 ):
     """
     Create a deposit transaction.
-    
+
     Only traders (and admins) can create deposits.
     Traders can create deposits for any user within their entity.
     """
@@ -377,14 +377,14 @@ async def create_deposit(
         # Insert transaction (simplified - in production, you'd have more complex logic)
         if db.db_type == 'postgresql':
             insert_query = """
-                INSERT INTO transactions (id, user_id, transaction_type, status, amount, currency_code, 
+                INSERT INTO transactions (id, user_id, transaction_type, status, amount, currency_code,
                                         description, created_at, processed_at)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
             """
             params = (transaction_id, user_id, 'deposit', 'completed', amount, currency_code.upper(), description)
         else:
             insert_query = """
-                INSERT INTO transactions (id, user_id, transaction_type, status, amount, currency_code, 
+                INSERT INTO transactions (id, user_id, transaction_type, status, amount, currency_code,
                                         description, created_at, processed_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
             """
@@ -428,7 +428,7 @@ async def create_withdrawal(
 ):
     """
     Create a withdrawal transaction.
-    
+
     Only traders (and admins) can create withdrawals.
     Traders can create withdrawals for any user within their entity.
     """
@@ -490,14 +490,14 @@ async def create_withdrawal(
         # Insert transaction (simplified - in production, you'd check balances, etc.)
         if db.db_type == 'postgresql':
             insert_query = """
-                INSERT INTO transactions (id, user_id, transaction_type, status, amount, currency_code, 
+                INSERT INTO transactions (id, user_id, transaction_type, status, amount, currency_code,
                                         description, created_at, processed_at)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
             """
             params = (transaction_id, user_id, 'withdrawal', 'completed', amount, currency_code.upper(), description)
         else:
             insert_query = """
-                INSERT INTO transactions (id, user_id, transaction_type, status, amount, currency_code, 
+                INSERT INTO transactions (id, user_id, transaction_type, status, amount, currency_code,
                                         description, created_at, processed_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
             """

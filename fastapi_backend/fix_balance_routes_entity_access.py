@@ -1,4 +1,32 @@
+#!/usr/bin/env python3
 """
+Fix Balance Routes - Entity Access Control
+Task 1: Update balance routes to enable entity-wide access for viewers and traders
+
+SCRIPT: fix_balance_routes_entity_access.py
+
+This script updates the balance routes to allow both viewers and traders 
+to access balance data for any user within their assigned entity.
+"""
+
+import os
+from pathlib import Path
+from datetime import datetime
+
+def create_backup(file_path):
+    """Create backup of existing file"""
+    if os.path.exists(file_path):
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        backup_path = f"{file_path}.backup.{timestamp}"
+        with open(file_path, 'r') as src, open(backup_path, 'w') as dst:
+            dst.write(src.read())
+        print(f"📁 Backup created: {backup_path}")
+        return backup_path
+    return None
+
+def create_updated_balance_routes():
+    """Create the updated balance routes with entity-wide access"""
+    return '''"""
 Balance management routes - With Entity-Wide Access Control
 Updated to allow viewers and traders to access all balance data within their entity
 """
@@ -384,3 +412,66 @@ async def get_user_balance_summary(
             status_code=500, 
             detail=f"Error retrieving balance summary: {str(e)}"
         )
+'''
+
+def main():
+    """Apply the balance routes entity access fix"""
+    
+    print("🚀 TASK 1: UPDATE BALANCE ROUTES - ENTITY-WIDE ACCESS")
+    print("=" * 60)
+    print()
+    print("Updating balance routes to allow viewers and traders")
+    print("to access balance data for any user within their entity.")
+    print()
+    
+    # Ensure api/routes directory exists
+    routes_dir = Path("api/routes")
+    routes_dir.mkdir(parents=True, exist_ok=True)
+    print(f"📁 Ensured directory exists: {routes_dir}")
+    
+    # Target file path
+    balance_routes_file = routes_dir / "balances.py"
+    
+    # Create backup if file exists
+    if balance_routes_file.exists():
+        backup_path = create_backup(str(balance_routes_file))
+        print(f"✅ Existing file backed up")
+    else:
+        print("📝 Creating new balance routes file")
+    
+    # Write updated content
+    updated_content = create_updated_balance_routes()
+    
+    with open(balance_routes_file, 'w') as f:
+        f.write(updated_content)
+    
+    print(f"✅ Updated: {balance_routes_file}")
+    print()
+    print("🔍 KEY CHANGES MADE:")
+    print("=" * 30)
+    print("✅ Replaced require_resource_owner_or_admin with require_entity_any_access")
+    print("✅ Added entity filtering for non-admin users")
+    print("✅ Enhanced access logging with entity context")
+    print("✅ Added entity balance summary endpoint")
+    print("✅ Added user balance summary with entity verification")
+    print("✅ Both viewers and traders can now access entity-wide balance data")
+    print()
+    print("🎯 EXPECTED BEHAVIOR:")
+    print("=" * 25)
+    print("• Viewers: READ access to all balance data within their entity")
+    print("• Traders: READ access to all balance data within their entity")
+    print("• Admins: READ access to all balance data across all entities")
+    print("• Cross-entity access: BLOCKED for non-admin users")
+    print()
+    print("📋 NEXT STEPS:")
+    print("=" * 20)
+    print("1. Restart FastAPI server: python3 main.py")
+    print("2. Test viewer access to entity balance data")
+    print("3. Verify cross-entity access is blocked")
+    print("4. Proceed to Task 2: Update Transaction Routes")
+    print()
+    print("🎉 TASK 1 COMPLETED SUCCESSFULLY!")
+
+
+if __name__ == "__main__":
+    main()
